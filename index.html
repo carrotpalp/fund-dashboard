@@ -4624,7 +4624,7 @@ async function estimateFundGz(code){
     if(e && e.estNav != null){
       const prevNav = (e.prevNav && e.prevNav>0) ? e.prevNav : e.nav;
       return {code, name:(e.name||''), price:e.estNav, last_close:e.nav,
-        change_amt:+(e.estNav - e.nav).toFixed(4), change_pct:(e.estChgPct!=null?e.estChgPct:0),
+        change_amt:(e.estChgAmt!=null?e.estChgAmt:+(e.estNav - e.nav).toFixed(4)), change_pct:(e.estChgPct!=null?e.estChgPct:0),
         amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
         est:!e.isOfficial, isOfficial:!!e.isOfficial, estMethod:'gh-action', isQDII:!!e.isQDII,
         isToday:true, navDate:e.navDate, gztime:(e.estTime||'') };
@@ -4840,37 +4840,14 @@ async function refreshWatchlist(){
     // 当日正式净值已披露 → 冻结，下个交易日再恢复估算
     if(w.q && w.q.isOfficial && w.q.navDate===tday) continue;
     const isQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外/.test((w.name||'')+' '+(w.q&&w.q.name||''));
-    let q = null;
-    if(showEst){
-      // 1) 盘中：实时估算净值（fundgz，~1s），仅交易时段刷新
-      if(doGz){
-        let gz = await fetchFundGz(w.code, true);   // allowEst=true
-        if(!gz) gz = await fetchFundGz(w.code, true);   // 偶发超时/限流，重试一次
-        if(gz){ fundGzCache[w.code] = gz; q = gz; }
-        else {
-          // 估算取数失败（持仓/报价跨域被拦截或超时）：优雅降级为官方净值并标注，避免静默“—”
-          if(!w.q || !(w.q.price>0)){
-            const nav = await fetchFundNav(w.code);
-            if(nav){ nav.estFailed = true; q = nav; }
-          } else if(w.q){ w.q.estFailed = true; }
-        }
-      } else if(fundGzCache[w.code]){
-        q = fundGzCache[w.code];
-      }
-    } else {
-      // 2) 盘前/休市/收盘后：一律显示官方净值（绝不用盘中估算）。
-      //    优先用 pingzhongdata 取真实官方历史（含真实日涨跌幅），失败再回退 fundgz 官方价格兜底。
-      const lastNav = lastFundNav[w.code]||0;
-      if(nowMs - lastNav > 60000){                              // 节流：至多每 60s 一次，不“频繁”拉取
-        const nav = await fetchFundNav(w.code);
-        lastFundNav[w.code] = nowMs;
-        if(nav){ nav.isQDII = isQDII; q = nav; }
-      }
-      // 若 pingzhongdata 未拿到（含缓存失效/超时/大文件失败），用 fundgz 官方价格兜底（无真实涨跌幅时显示“—”）
-      if(!q && (!w.q || w.q.est) && (nowMs - lastFundGz) > 5000){
-        const gz = await fetchFundGz(w.code, false);   // allowEst=false → 强制取官方净值
-        if(gz && !gz.est){ fundGzCache[w.code] = gz; q = gz; }   // 仅官方净值，绝不用盘中估算（避免闪跳）
-      }
+    // 优先：云端 fund_estimates.json（公网直用，无需本地代理）。
+    //   - 非 QDII 且今日官方未披露 → 返回“当日估算”(est=true)，页面显示「估」+ 当日收益=估算收益
+    //   - QDII 或今日官方已披露   → 返回官方净值(est=false)，QDII 展示滞后官方净值及其上一日收益
+    let q = await estimateFundGz(w.code);
+    if(!q){
+      // 云端无此基金（自选尚未同步到 funds.json）→ 回退官方净值兜底
+      const nav = await fetchFundNav(w.code);
+      if(nav){ nav.isQDII = isQDII; q = nav; }
     }
     if(q) w.q = q;
   }

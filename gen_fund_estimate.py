@@ -194,38 +194,48 @@ def main():
                 # 盘后股价已定，算出来即为收盘估算；官方净值披露后才会切到 isOfficial。
                 hd = get_holdings(code)
                 rec["name"] = hd["fundName"]
-                rec["isOfficial"] = False
-                if hd["holdings"]:
-                    topW = sum(h["weight"] for h in hd["holdings"])
-                    stockPct = max(0.0, min(100.0, topW / 0.62))
-                    chgs = []
-                    for h in hd["holdings"]:
-                        c = get_stock_chg(to_secid(h["code"]))
-                        if c is not None:
-                            chgs.append((h["weight"], c))
-                    if chgs:
-                        wsum = sum(w for w, _ in chgs)
-                        wavg = sum(w * c for w, c in chgs) / wsum if wsum else 0.0
-                        estChgPct = stockPct / 100.0 * wavg
-                        estNav = nav * (1 + estChgPct / 100.0)
-                        rec["estNav"] = round(estNav, 4)
-                        rec["estChgPct"] = round(estChgPct, 2)
-                        rec["estChgAmt"] = round(estNav - nav, 4)
-                        rec["stockPct"] = round(stockPct, 2)
-                        rec["topWeightSum"] = round(topW, 2)
-                        rec["holdingsCount"] = len(hd["holdings"])
-                        rec["estTime"] = now_bj().strftime("%Y-%m-%d %H:%M")
+                is_qdii = bool(re.search(r"QDII|纳斯达克|标普|道琼斯|环球|海外",
+                                         (rec.get("name", "") or "") + " " + (ftype or ""))) or (ftype and '007' in ftype)
+                if is_qdii:
+                    # QDII 净值滞后(T+1/T+2)，用持仓股实时涨跌推算的“估算”不可靠；
+                    # 直接展示最新可得官方净值及其真实日涨跌幅（即上一交易日收益），与旧版一致。
+                    rec["isOfficial"] = True
+                    rec["estNav"] = nav
+                    rec["estChgPct"] = round((nav - prevNav) / prevNav * 100, 4) if prevNav > 0 else 0.0
+                    rec["estChgAmt"] = round(nav - prevNav, 4)
+                else:
+                    rec["isOfficial"] = False
+                    if hd["holdings"]:
+                        topW = sum(h["weight"] for h in hd["holdings"])
+                        stockPct = max(0.0, min(100.0, topW / 0.62))
+                        chgs = []
+                        for h in hd["holdings"]:
+                            c = get_stock_chg(to_secid(h["code"]))
+                            if c is not None:
+                                chgs.append((h["weight"], c))
+                        if chgs:
+                            wsum = sum(w for w, _ in chgs)
+                            wavg = sum(w * c for w, c in chgs) / wsum if wsum else 0.0
+                            estChgPct = stockPct / 100.0 * wavg
+                            estNav = nav * (1 + estChgPct / 100.0)
+                            rec["estNav"] = round(estNav, 4)
+                            rec["estChgPct"] = round(estChgPct, 2)
+                            rec["estChgAmt"] = round(estNav - nav, 4)
+                            rec["stockPct"] = round(stockPct, 2)
+                            rec["topWeightSum"] = round(topW, 2)
+                            rec["holdingsCount"] = len(hd["holdings"])
+                            rec["estTime"] = now_bj().strftime("%Y-%m-%d %H:%M")
+                        else:
+                            # 持仓股取不到实时报价 → 无法估算，回退展示最近官方净值（标注待披露）
+                            rec["estNav"] = nav
+                            rec["estChgPct"] = round((nav - prevNav) / prevNav * 100, 2) if prevNav > 0 else 0.0
+                            rec["estChgAmt"] = round(nav - prevNav, 4)
                     else:
-                        # 持仓股取不到实时报价 → 无法估算，回退展示最近官方净值（标注待披露）
                         rec["estNav"] = nav
                         rec["estChgPct"] = round((nav - prevNav) / prevNav * 100, 2) if prevNav > 0 else 0.0
                         rec["estChgAmt"] = round(nav - prevNav, 4)
-                else:
-                    rec["estNav"] = nav
-                    rec["estChgPct"] = round((nav - prevNav) / prevNav * 100, 2) if prevNav > 0 else 0.0
-                    rec["estChgAmt"] = round(nav - prevNav, 4)
             rec["isQDII"] = bool(re.search(r"QDII|纳斯达克|标普|道琼斯|环球|海外",
-                                            (rec.get("name", "") or "") + " " + (ftype or "")))
+                                            (rec.get("name", "") or "") + " " + (ftype or ""))) or (ftype and '007' in ftype)
             out["funds"][code] = rec
             print("  %s nav=%.4f estNav=%s chg=%s official=%s"
                   % (code, nav, rec.get("estNav"), rec.get("estChgPct"), rec["isOfficial"]))
