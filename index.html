@@ -825,6 +825,12 @@ html.light .theme-btn::after{content:'☀️';left:16px}
         <b>信号引擎说明（请先看，再验证）</b>
         <div><b>数据源与实时性（先看这个）：</b>①<b>始终实时</b>——指数涨跌、自选股/ETF 价格与涨跌来自<b>腾讯财经 qt.gtimg.cn</b>（与东方财富无关），这是核心盯盘内容，<b>不带延迟</b>；②<b>日线级</b>——自选股均线/MACD 来自<b>新浪日K</b>（判断趋势足够）；③<b>广度/行业/北向</b>来自<b>东方财富 push2</b>：本机网络到 push2 可达即<b>实时</b>，不可达时自动回落 push2delay（延迟约15~20分钟）。面板顶部「数据源状态」实时显示每个源是实时还是延迟；延迟源信号会在条件里注明“延迟广度”，且排序时自动靠后，不会排在最前误导你。</div>
         <div><b>如何保证完全实时？</b>延迟只发生在东财 push2 不可达时。最轻量办法：在本地运行 <code>proxy_server.py</code>（单文件、Python 标准库、零依赖、CORS*），然后 <button id="proxyConfigBtn" class="proxy-config-btn">配置代理地址</button>，填入如 <code>http://localhost:8899</code>，刷新后页面即走服务端实时代理，广度/行业/北向也实时。代理脚本已放在项目目录，双击/命令行运行即可。</div>
+        <div><b>场外基金自动估算（免编辑文件）：</b>云端 GitHub Action 读不到你浏览器里的自选，所以页面会在你增删场外基金时，自动把场外基金代码同步到仓库 <code>funds.json</code>、由 Action 云端估算——你<b>不用编辑任何 txt</b>。首次只需在下方粘贴一次 GitHub Token（仅本仓库 <code>contents:write</code> 权限），粘贴后应用自行提交；之后加基金全自动。<span id="ghTokenStatus" style="margin-left:6px"></span><br>
+          <input type="password" id="ghTokenInput" placeholder="粘贴 GitHub Token（ghp_… 或 fine-grained，仅授予本仓库）" style="width:340px;max-width:70vw">
+          <button id="ghTokenSave">保存</button>
+          <button id="ghTokenClear">清除</button>
+          <span style="color:#888;font-size:12px">Token 仅存于本机浏览器 localStorage，不会上传到任何地方（仅用于向本仓库提交 funds.json）。</span>
+        </div>
         <div><b>可靠性保障：</b>信号经<b>多维市场状态过滤</b>——综合指数趋势、涨跌广度、广度趋势、个股中位数、主力资金流、北向六个维度判定大盘环境，与大盘环境矛盾的“单维假信号”会被降级或抑制；当广度来自延迟源时，大盘/行业类信号自动降权并标注“延迟广度”。所有信号仅供参考，不构成投资建议。</div>
         <div><b>逻辑：</b>不是 AI 预测，是规则触发。量价异动必须结合<b>均线排列、MACD 金叉/死叉、趋势位置、大盘环境</b>才出建议。例如“放量上攻”仅在均线多头+MACD金叉时才给“加仓”；高位放量给“减仓/不追”；缩量会区分“下跌中继”与“健康洗盘”。</div>
         <div><b>确定度 / 胜率（已不在卡片逐条展示）：</b>数字是规则强度评分（0~1），不是统计胜率；所有展示项均为 ≥0.80 的参考信号，逐条标注反而误导，故卡片不再显示。它<b>未经过历史回测验证</b>，不能当作交易保证。</div>
@@ -4255,6 +4261,7 @@ function saveWL(){
     const persist = STATE.watchlist.map(w=>({code:w.code, src:w.src||'tencent', name:w.name||'', secid:w.secid||'', classify:w.classify||'', units:w.units||0, cost:w.cost||0}));
     localStorage.setItem(WL_KEY, JSON.stringify(persist));
   }catch(e){ console.error('saveWL', e); }
+  try{ syncWatchlistDebounced(); }catch(e){}   // 自选变化 → 自动把场外基金同步到仓库供云端估算
 }
 /* ===================== 自选股导出 / 导入 ===================== */
 // 导出：把当前自选股序列化为 JSON 文件下载（含持仓份额/成本价，便于备份与跨设备迁移）
@@ -4580,6 +4587,35 @@ function loadFundEstimates(){
   return _fundEstPromise;
 }
 loadFundEstimates();   // 启动时预热缓存，首个刷新周期即有数据
+// ============ 自选场外基金 → 仓库 funds.json 自动同步 ============
+// 云端 GitHub Action 读不到浏览器 localStorage，故页面在自选变化时把场外基金代码自动提交到
+// 仓库 funds.json，Action 下次调度即纳入估算。需一次性 GitHub Token（仅本仓库 contents:write）。
+let _syncTimer = null;
+async function syncWatchlistToRepo(){
+  const token = (function(){ try{ return localStorage.getItem('gh_token')||''; }catch(e){ return ''; } })().trim();
+  if(!token) return;
+  const codes = (STATE.watchlist||[])
+    .filter(w=>w.classify==='OTCFUND' && /^\d{6}$/.test((w.code||'').trim()))
+    .map(w=>w.code.trim());
+  if(!codes.length) return;
+  const content = JSON.stringify({updatedAt:new Date().toISOString(), codes}, null, 2);
+  const api = 'https://api.github.com/repos/carrotpalp/fund-dashboard/contents/funds.json';
+  try{
+    const head = await fetch(api, {headers:{Authorization:'Bearer '+token, Accept:'application/vnd.github+json'}});
+    let sha = null;
+    if(head.status===200){ const j = await head.json(); sha = j.sha; }
+    const body = {message:'chore: sync OTC fund watchlist', content: btoa(unescape(encodeURIComponent(content)))};
+    if(sha) body.sha = sha;
+    const res = await fetch(api, {method:'PUT', headers:{Authorization:'Bearer '+token, Accept:'application/vnd.github+json', 'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const st = document.getElementById('ghTokenStatus');
+    if(res.ok){ console.log('[sync] funds.json 已更新，纳入 '+codes.length+' 只场外基金'); if(st) st.innerHTML='<span style="color:var(--up)">已同步 '+codes.length+' 只场外基金到云端</span>'; }
+    else { console.warn('[sync] funds.json 更新失败', res.status); if(st) st.innerHTML='<span style="color:var(--down)">同步失败('+res.status+')，检查 Token 权限</span>'; }
+  }catch(e){ console.warn('[sync] 同步失败', e); const st=document.getElementById('ghTokenStatus'); if(st) st.innerHTML='<span style="color:var(--down)">同步出错</span>'; }
+}
+function syncWatchlistDebounced(){
+  if(_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(()=>{ syncWatchlistToRepo(); }, 1500);
+}
 async function estimateFundGz(code){
   // 优先：云端提交的 fund_estimates.json（公网直接用，无需代理）
   try{
@@ -5118,7 +5154,27 @@ try{
     });
   }
 }catch(e){ console.error(e); }
-// 信号工具栏：仅实时过滤 + 数据源状态总览
+// 场外基金自动同步：GitHub Token 配置（一次性，仅本仓库 contents:write）
+try{
+  const tokInput = document.getElementById('ghTokenInput');
+  const tokStatus = document.getElementById('ghTokenStatus');
+  const savedTok = (function(){ try{ return localStorage.getItem('gh_token')||''; }catch(e){ return ''; } })();
+  if(tokInput && savedTok) tokInput.value = savedTok;
+  if(tokStatus && savedTok) tokStatus.innerHTML = '<span style="color:var(--up)">Token 已配置</span>';
+  const saveBtn = document.getElementById('ghTokenSave');
+  if(saveBtn) saveBtn.addEventListener('click', ()=>{
+    const v = (tokInput && tokInput.value || '').trim();
+    try{ if(v) localStorage.setItem('gh_token', v); else localStorage.removeItem('gh_token'); }catch(e){}
+    if(tokStatus) tokStatus.innerHTML = v ? '<span style="color:var(--up)">已保存，正在同步…</span>' : '<span style="color:#888">已清除</span>';
+    if(v) syncWatchlistToRepo();
+  });
+  const clrBtn = document.getElementById('ghTokenClear');
+  if(clrBtn) clrBtn.addEventListener('click', ()=>{
+    try{ localStorage.removeItem('gh_token'); }catch(e){}
+    if(tokInput) tokInput.value = '';
+    if(tokStatus) tokStatus.innerHTML = '<span style="color:#888">已清除</span>';
+  });
+}catch(e){ console.error(e); }
 try{
   const rtEl = document.getElementById('sigRealtimeOnly');
   if(rtEl){ rtEl.checked = sigRealtimeOnly; rtEl.addEventListener('change', ()=>{ sigRealtimeOnly = rtEl.checked; try{ localStorage.setItem(RTONLY_KEY, sigRealtimeOnly?'1':'0'); }catch(e){} _sigSig=''; renderSignals(); }); }

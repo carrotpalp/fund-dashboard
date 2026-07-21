@@ -21,6 +21,7 @@ import urllib.request
 import json
 import re
 import sys
+import os
 import datetime
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -136,16 +137,28 @@ def is_trading_now():
 
 def main():
     codes = []
+    # 优先读 funds.json（由页面自动同步的自选场外基金列表），其次 fund_list.txt（手动覆盖）
     try:
-        with open("fund_list.txt", encoding="utf-8") as f:
-            for line in f:
-                c = line.strip()
-                if c and not c.startswith("#"):
-                    codes.append(c)
+        with open("funds.json", encoding="utf-8") as f:
+            fj = json.load(f)
+        fc = fj.get("codes") or fj.get("funds") or []
+        if isinstance(fc, list):
+            codes = [str(c).strip() for c in fc if str(c).strip()]
     except FileNotFoundError:
-        codes = []
+        pass
+    except Exception:
+        pass
     if not codes:
-        print("fund_list.txt 为空或无基金代码，跳过。", file=sys.stderr)
+        try:
+            with open("fund_list.txt", encoding="utf-8") as f:
+                for line in f:
+                    c = line.strip()
+                    if c and not c.startswith("#"):
+                        codes.append(c)
+        except FileNotFoundError:
+            codes = []
+    if not codes:
+        print("funds.json / fund_list.txt 均无有效基金代码，跳过。", file=sys.stderr)
         # 仍写出一个空结构，避免页面报错
         with open("fund_estimates.json", "w", encoding="utf-8") as f:
             json.dump({"updatedAt": now_bj().isoformat(timespec="seconds"),
@@ -177,10 +190,12 @@ def main():
                 rec["isOfficial"] = True
                 rec["estTime"] = navDate
             else:
+                # 当日正式净值尚未披露（navDate < 今天）：无论盘中还是盘后，都算“今天的估算”。
+                # 盘后股价已定，算出来即为收盘估算；官方净值披露后才会切到 isOfficial。
                 hd = get_holdings(code)
                 rec["name"] = hd["fundName"]
                 rec["isOfficial"] = False
-                if trading and hd["holdings"]:
+                if hd["holdings"]:
                     topW = sum(h["weight"] for h in hd["holdings"])
                     stockPct = max(0.0, min(100.0, topW / 0.62))
                     chgs = []
@@ -201,6 +216,7 @@ def main():
                         rec["holdingsCount"] = len(hd["holdings"])
                         rec["estTime"] = now_bj().strftime("%Y-%m-%d %H:%M")
                     else:
+                        # 持仓股取不到实时报价 → 无法估算，回退展示最近官方净值（标注待披露）
                         rec["estNav"] = nav
                         rec["estChgPct"] = round((nav - prevNav) / prevNav * 100, 2) if prevNav > 0 else 0.0
                         rec["estChgAmt"] = round(nav - prevNav, 4)
@@ -215,9 +231,22 @@ def main():
                   % (code, nav, rec.get("estNav"), rec.get("estChgPct"), rec["isOfficial"]))
         except Exception as e:
             print("  %s ERROR %s" % (code, e), file=sys.stderr)
-    with open("fund_estimates.json", "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
-    print("wrote fund_estimates.json with %d funds" % len(out["funds"]))
+    # 仅当估算数据真正变化时才写文件，避免每个调度周期都产生无意义 commit
+    changed = True
+    if os.path.exists("fund_estimates.json"):
+        try:
+            with open("fund_estimates.json", encoding="utf-8") as f:
+                old = json.load(f)
+            if old.get("funds") == out["funds"]:
+                changed = False
+        except Exception:
+            pass
+    if changed:
+        with open("fund_estimates.json", "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+        print("wrote fund_estimates.json with %d funds" % len(out["funds"]))
+    else:
+        print("fund_estimates.json 无变化，跳过写入")
 
 if __name__ == "__main__":
     main()
