@@ -825,12 +825,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
         <b>信号引擎说明（请先看，再验证）</b>
         <div><b>数据源与实时性（先看这个）：</b>①<b>始终实时</b>——指数涨跌、自选股/ETF 价格与涨跌来自<b>腾讯财经 qt.gtimg.cn</b>（与东方财富无关），这是核心盯盘内容，<b>不带延迟</b>；②<b>日线级</b>——自选股均线/MACD 来自<b>新浪日K</b>（判断趋势足够）；③<b>广度/行业/北向</b>来自<b>东方财富 push2</b>：本机网络到 push2 可达即<b>实时</b>，不可达时自动回落 push2delay（延迟约15~20分钟）。面板顶部「数据源状态」实时显示每个源是实时还是延迟；延迟源信号会在条件里注明“延迟广度”，且排序时自动靠后，不会排在最前误导你。</div>
         <div><b>如何保证完全实时？</b>延迟只发生在东财 push2 不可达时。最轻量办法：在本地运行 <code>proxy_server.py</code>（单文件、Python 标准库、零依赖、CORS*），然后 <button id="proxyConfigBtn" class="proxy-config-btn">配置代理地址</button>，填入如 <code>http://localhost:8899</code>，刷新后页面即走服务端实时代理，广度/行业/北向也实时。代理脚本已放在项目目录，双击/命令行运行即可。</div>
-        <div><b>场外基金自动估算（免编辑文件）：</b>云端 GitHub Action 读不到你浏览器里的自选，所以页面会在你增删场外基金时，自动把场外基金代码同步到仓库 <code>funds.json</code>、由 Action 云端估算——你<b>不用编辑任何 txt</b>。首次只需在下方粘贴一次 GitHub Token（仅本仓库 <code>contents:write</code> 权限），粘贴后应用自行提交；之后加基金全自动。<span id="ghTokenStatus" style="margin-left:6px"></span><br>
-          <input type="password" id="ghTokenInput" placeholder="粘贴 GitHub Token（ghp_… 或 fine-grained，仅授予本仓库）" style="width:340px;max-width:70vw">
-          <button id="ghTokenSave">保存</button>
-          <button id="ghTokenClear">清除</button>
-          <span style="color:#888;font-size:12px">Token 仅存于本机浏览器 localStorage，不会上传到任何地方（仅用于向本仓库提交 funds.json）。</span>
-        </div>
+        <div><b>场外基金自动估算（全自动，零配置）：</b>页面在浏览器内直接加载东方财富公开净值数据 <code>pingzhongdata</code>（跨域可用、不校验来源），对任意自选场外基金——<b>含 QDII</b>——自动估算当日涨跌并标注「估」；QDII 自动识别并展示滞后官方净值与上一披露日收益。<b>你只需把基金加进自选，其余全自动，无需 Token、无需编辑文件、无需本地代理。</b></div>
         <div><b>可靠性保障：</b>信号经<b>多维市场状态过滤</b>——综合指数趋势、涨跌广度、广度趋势、个股中位数、主力资金流、北向六个维度判定大盘环境，与大盘环境矛盾的“单维假信号”会被降级或抑制；当广度来自延迟源时，大盘/行业类信号自动降权并标注“延迟广度”。所有信号仅供参考，不构成投资建议。</div>
         <div><b>逻辑：</b>不是 AI 预测，是规则触发。量价异动必须结合<b>均线排列、MACD 金叉/死叉、趋势位置、大盘环境</b>才出建议。例如“放量上攻”仅在均线多头+MACD金叉时才给“加仓”；高位放量给“减仓/不追”；缩量会区分“下跌中继”与“健康洗盘”。</div>
         <div><b>确定度 / 胜率（已不在卡片逐条展示）：</b>数字是规则强度评分（0~1），不是统计胜率；所有展示项均为 ≥0.80 的参考信号，逐条标注反而误导，故卡片不再显示。它<b>未经过历史回测验证</b>，不能当作交易保证。</div>
@@ -4261,7 +4256,7 @@ function saveWL(){
     const persist = STATE.watchlist.map(w=>({code:w.code, src:w.src||'tencent', name:w.name||'', secid:w.secid||'', classify:w.classify||'', units:w.units||0, cost:w.cost||0}));
     localStorage.setItem(WL_KEY, JSON.stringify(persist));
   }catch(e){ console.error('saveWL', e); }
-  try{ syncWatchlistDebounced(); }catch(e){}   // 自选变化 → 自动把场外基金同步到仓库供云端估算
+  // 场外基金估算已在浏览器内自动完成（客户端 pingzhongdata），无需同步到仓库
 }
 /* ===================== 自选股导出 / 导入 ===================== */
 // 导出：把当前自选股序列化为 JSON 文件下载（含持仓份额/成本价，便于备份与跨设备迁移）
@@ -4565,10 +4560,10 @@ function parseHoldings(html){
   }
   return out;
 }
-// ============ 场外基金：云端 fund_estimates.json 消费层（GitHub Pages 零代理方案）============
-// GitHub Action 在云端（固定公网出口，可自由设置 eastmoney Referer）定时计算基金估算，
-// 结果提交为 fund_estimates.json（与页面同源）。页面优先读取该 JSON → 公网直接用，无需任何本地代理。
-// 仅在配置了本地代理(DATA_PROXY_URL)时，才回退到原来的代理取数逻辑（本地运行 proxy_server.py 的用户）。
+// ============ 场外基金：客户端估算（主力）+ 云端 fund_estimates.json（回退）============
+// 主力：浏览器内直接加载东方财富公开净值数据 pingzhongdata（iframe 跨域、不校验 Referer），
+//   对任意自选场外基金（含 QDII）自动估算/展示，无需 Token、无需把代码同步到仓库、无需本地代理。
+// 回退：云端 fund_estimates.json（仅对已在仓库 funds.json 的基金有效；自动生成，无需手动）。
 let _fundEstPromise = null;
 function loadFundEstimates(){
   if(_fundEstPromise) return _fundEstPromise;
@@ -4587,37 +4582,65 @@ function loadFundEstimates(){
   return _fundEstPromise;
 }
 loadFundEstimates();   // 启动时预热缓存，首个刷新周期即有数据
-// ============ 自选场外基金 → 仓库 funds.json 自动同步 ============
-// 云端 GitHub Action 读不到浏览器 localStorage，故页面在自选变化时把场外基金代码自动提交到
-// 仓库 funds.json，Action 下次调度即纳入估算。需一次性 GitHub Token（仅本仓库 contents:write）。
-let _syncTimer = null;
-async function syncWatchlistToRepo(){
-  const token = (function(){ try{ return localStorage.getItem('gh_token')||''; }catch(e){ return ''; } })().trim();
-  if(!token) return;
-  const codes = (STATE.watchlist||[])
-    .filter(w=>w.classify==='OTCFUND' && /^\d{6}$/.test((w.code||'').trim()))
-    .map(w=>w.code.trim());
-  if(!codes.length) return;
-  const content = JSON.stringify({updatedAt:new Date().toISOString(), codes}, null, 2);
-  const api = 'https://api.github.com/repos/carrotpalp/fund-dashboard/contents/funds.json';
-  try{
-    const head = await fetch(api, {headers:{Authorization:'Bearer '+token, Accept:'application/vnd.github+json'}});
-    let sha = null;
-    if(head.status===200){ const j = await head.json(); sha = j.sha; }
-    const body = {message:'chore: sync OTC fund watchlist', content: btoa(unescape(encodeURIComponent(content)))};
-    if(sha) body.sha = sha;
-    const res = await fetch(api, {method:'PUT', headers:{Authorization:'Bearer '+token, Accept:'application/vnd.github+json', 'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const st = document.getElementById('ghTokenStatus');
-    if(res.ok){ console.log('[sync] funds.json 已更新，纳入 '+codes.length+' 只场外基金'); if(st) st.innerHTML='<span style="color:var(--up)">已同步 '+codes.length+' 只场外基金到云端</span>'; }
-    else { console.warn('[sync] funds.json 更新失败', res.status); if(st) st.innerHTML='<span style="color:var(--down)">同步失败('+res.status+')，检查 Token 权限</span>'; }
-  }catch(e){ console.warn('[sync] 同步失败', e); const st=document.getElementById('ghTokenStatus'); if(st) st.innerHTML='<span style="color:var(--down)">同步出错</span>'; }
-}
-function syncWatchlistDebounced(){
-  if(_syncTimer) clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(()=>{ syncWatchlistToRepo(); }, 1500);
-}
+// （场外基金估算已改为纯客户端实现：浏览器内加载 pingzhongdata，无需把自选同步到仓库、不需要 GitHub Token）
 async function estimateFundGz(code){
-  // 优先：云端提交的 fund_estimates.json（公网直接用，无需代理）
+  // 1) 客户端优先：pingzhongdata（iframe 跨域加载，对任意自选场外基金都可用，无需 Token/代理/手动同步）
+  //    QDII 自动识别 → 展示滞后官方净值 + 上一披露日收益；非 QDII → 前十大持仓实时涨跌 × 股票占净比 估算
+  try{
+    const pd = await getFundPzd(code);   // 按日缓存的净值/持仓/仓位数据
+    if(pd && pd.arr && pd.arr.length){
+      const arr = pd.arr;
+      const last = arr[arr.length-1];
+      const prev = arr[arr.length-2] || last;
+      const nav = +last.y, prevNav = (+prev.y || nav);
+      if(nav>0){
+        const navDate = tsToDate(last.x);
+        const name = (pd.name||'').trim();
+        // QDII 判定：名称含境外关键词，或净值披露日滞后 >1 天（T+2 及以上多为 QDII/互认基金）
+        const ys = new Date(Date.now()-86400000), p=n=>String(n).padStart(2,'0');
+        const yStr = ys.getFullYear()+'-'+p(ys.getMonth()+1)+'-'+p(ys.getDate());
+        const nameQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外|美国|全球|亚太|欧洲|日本|德国|香港|恒生|中概|境外|美元/.test(name);
+        const isQDII = nameQDII || (navDate && navDate < yStr);
+        const chgPct = (prevNav>0) ? +(((nav-prevNav)/prevNav)*100).toFixed(2) : (+(last.equityReturn||0)||0);
+        const chgAmt = +((nav-prevNav)).toFixed(4);
+        if(isQDII){
+          // QDII：不估算（海外持仓实时价不可得），展示最新可得官方净值与上一披露日收益（与旧版一致）
+          return {code, name, price:nav, last_close:prevNav, change_amt:chgAmt, change_pct:chgPct,
+            amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+            est:false, isOfficial:true, estMethod:'pzd-official', isQDII:true,
+            isToday:(navDate===todayStr()), navDate, gztime:navDate };
+        }
+        // 非 QDII：自建估算（前十大持仓股实时涨跌 × 股票占净比；个股权重不可免费得，等权近似）
+        let stockPct = 90;
+        if(pd.sharesPos && pd.sharesPos.length){
+          const sp = pd.sharesPos[pd.sharesPos.length-1];
+          const v = Array.isArray(sp) ? +sp[1] : +sp;
+          if(v>0) stockPct = v;
+        }
+        const secids = (pd.stockCodesNew||[]).filter(s=>/^\d\.\d{6}$/.test(s)).slice(0,10);
+        let wAvg = 0, got = 0;
+        if(secids.length){
+          const qs = await Promise.all(secids.map(s=>estQuote(s)));
+          const valid = qs.filter(q=>q && q.change_pct!=null && !isNaN(q.change_pct));
+          if(valid.length){ wAvg = valid.reduce((a,q)=>a+(q.change_pct||0),0)/valid.length; got = valid.length; }
+        }
+        const estChgPct = +((stockPct/100)*wAvg).toFixed(2);
+        const estNav = +(nav*(1+estChgPct/100)).toFixed(4);
+        if(got){
+          return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), change_pct:estChgPct,
+            amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+            est:true, isOfficial:false, estMethod:'holdings', isQDII:false,
+            isToday:true, navDate, gztime:tsToDate(Date.now())+' '+new Date().toLocaleTimeString('zh-CN',{hour12:false}) };
+        }
+        // 持仓股实时报价取不到 → 降级为官方净值（标注估算暂不可用），保证有数可看
+        return {code, name, price:nav, last_close:prevNav, change_amt:chgAmt, change_pct:chgPct,
+          amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+          est:false, isOfficial:true, estFailed:true, estMethod:'pzd-fallback', isQDII:false,
+          isToday:(navDate===todayStr()), navDate, gztime:navDate };
+      }
+    }
+  }catch(e){ console.warn('estimateFundGz client-side', code, e); }
+  // 2) 回退：云端 fund_estimates.json（仅对已在仓库 funds.json 的基金有效；自动生成，无需手动）
   try{
     const cache = await loadFundEstimates();
     const e = cache && cache[code];
@@ -4630,37 +4653,23 @@ async function estimateFundGz(code){
         isToday:true, navDate:e.navDate, gztime:(e.estTime||'') };
     }
   }catch(e){}
-  // 回退：本地代理取数（仅本地运行 proxy_server.py 且配置了 DATA_PROXY_URL 的用户）
-  try{
-    const navData = await getNavFromProxy(code, '__fundnav_'+code);
-    if(!navData || !(navData.nav>0)) return null;
-    const navNow0 = navData.nav;
-    const hd = await getHoldingsFromProxy(code);
-    const holdings = hd.holdings;
-    if(!holdings.length) return null;
-    const topW = holdings.reduce((a,h)=>a+(h.weight||0),0);
-    const stockPct = Math.max(0, Math.min(100, topW/0.62));   // 反推股票占净比
-    const chgs = await Promise.all(holdings.map(async h=>{ const q=await estQuote(toSecid(h.code)); return q?(q.change_pct||0):null; }));
-    const valid = chgs.filter(x=>x!==null && !isNaN(x));
-    if(!valid.length) return null;
-    const wSum = topW||1;
-    const wAvg = holdings.reduce((a,h,i)=> a + (h.weight||0)*(chgs[i]||0), 0)/wSum;   // 前十大按权重加权平均
-    const estChgPct = +(stockPct/100 * wAvg).toFixed(2);
-    const estNav = +(navNow0 * (1 + estChgPct/100)).toFixed(4);
-    if(navData.navDate && navNow0>0) setFundHistCache(code, navData.navDate, navNow0);
-    const isQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外/.test((hd.fundName||'')+' '+(navData.fundType||''));
-    return {code, name:(hd.fundName||''), price:estNav, last_close:navNow0, change_amt:+(estNav-navNow0).toFixed(4), change_pct:estChgPct,
-      amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0, est:true, isOfficial:false, estMethod:'holdings', isQDII, isToday:true, navDate:navData.navDate, gztime:'' };
-  }catch(e){ console.error('estimateFundGz',e); return null; }
+  return null;
 }
 const _pzdCache = {};   // code -> {date, data}：pingzhongdata 按日缓存（持仓/配置/基础净值每日才变）
-async function getPzd(code){
+async function getFundPzd(code){
   const t = todayStr();
   const c = _pzdCache[code];
   if(c && c.date===t) return c.data;
-  const data = await fundNavJsonp(code);
+  let data = null;
+  try{ const pd = await fundNavJsonp(code); if(pd && Array.isArray(pd.arr) && pd.arr.length) data = pd; }catch(e){ console.warn('getFundPzd', code, e); }
   _pzdCache[code] = {date:t, data};
   return data;
+}
+function tsToDate(ms){
+  const d = new Date(ms);
+  if(isNaN(d.getTime())) return '';
+  const p = n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
 }
 const _estQuoteCache = {};   // secid -> {t, q}：持仓股实时报价 10s 缓存
 async function estQuote(secid){
@@ -5131,27 +5140,7 @@ try{
     });
   }
 }catch(e){ console.error(e); }
-// 场外基金自动同步：GitHub Token 配置（一次性，仅本仓库 contents:write）
-try{
-  const tokInput = document.getElementById('ghTokenInput');
-  const tokStatus = document.getElementById('ghTokenStatus');
-  const savedTok = (function(){ try{ return localStorage.getItem('gh_token')||''; }catch(e){ return ''; } })();
-  if(tokInput && savedTok) tokInput.value = savedTok;
-  if(tokStatus && savedTok) tokStatus.innerHTML = '<span style="color:var(--up)">Token 已配置</span>';
-  const saveBtn = document.getElementById('ghTokenSave');
-  if(saveBtn) saveBtn.addEventListener('click', ()=>{
-    const v = (tokInput && tokInput.value || '').trim();
-    try{ if(v) localStorage.setItem('gh_token', v); else localStorage.removeItem('gh_token'); }catch(e){}
-    if(tokStatus) tokStatus.innerHTML = v ? '<span style="color:var(--up)">已保存，正在同步…</span>' : '<span style="color:#888">已清除</span>';
-    if(v) syncWatchlistToRepo();
-  });
-  const clrBtn = document.getElementById('ghTokenClear');
-  if(clrBtn) clrBtn.addEventListener('click', ()=>{
-    try{ localStorage.removeItem('gh_token'); }catch(e){}
-    if(tokInput) tokInput.value = '';
-    if(tokStatus) tokStatus.innerHTML = '<span style="color:#888">已清除</span>';
-  });
-}catch(e){ console.error(e); }
+// （GitHub Token 配置 UI 已移除：场外基金估算现纯客户端实现，零手动步骤）
 try{
   const rtEl = document.getElementById('sigRealtimeOnly');
   if(rtEl){ rtEl.checked = sigRealtimeOnly; rtEl.addEventListener('change', ()=>{ sigRealtimeOnly = rtEl.checked; try{ localStorage.setItem(RTONLY_KEY, sigRealtimeOnly?'1':'0'); }catch(e){} _sigSig=''; renderSignals(); }); }
