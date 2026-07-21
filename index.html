@@ -4558,10 +4558,44 @@ function parseHoldings(html){
   }
   return out;
 }
+// ============ 场外基金：云端 fund_estimates.json 消费层（GitHub Pages 零代理方案）============
+// GitHub Action 在云端（固定公网出口，可自由设置 eastmoney Referer）定时计算基金估算，
+// 结果提交为 fund_estimates.json（与页面同源）。页面优先读取该 JSON → 公网直接用，无需任何本地代理。
+// 仅在配置了本地代理(DATA_PROXY_URL)时，才回退到原来的代理取数逻辑（本地运行 proxy_server.py 的用户）。
+let _fundEstPromise = null;
+function loadFundEstimates(){
+  if(_fundEstPromise) return _fundEstPromise;
+  _fundEstPromise = (async ()=>{
+    try{
+      const r = await fetch('./fund_estimates.json?t=' + Date.now(), {cache:'no-store'});
+      if(!r.ok) return {};
+      const j = await r.json();
+      window.__FUND_EST_CACHE = (j && j.funds) ? j.funds : {};
+      window.__FUND_EST_UPDATED = (j && j.updatedAt) || '';
+      return window.__FUND_EST_CACHE;
+    }catch(e){ console.warn('loadFundEstimates failed', e); return {}; }
+  })();
+  // 60s 后允许下次调用重新拉取（Action 每 5 分钟更新一次，60s 刷新足够新鲜）
+  setTimeout(()=>{ _fundEstPromise = null; }, 60000);
+  return _fundEstPromise;
+}
+loadFundEstimates();   // 启动时预热缓存，首个刷新周期即有数据
 async function estimateFundGz(code){
+  // 优先：云端提交的 fund_estimates.json（公网直接用，无需代理）
   try{
-    // NAV/持仓必须走本地代理（api.fund/fundf10 校验 Referer，浏览器直连被拒）。
-    // fundProxyUrl 在未配置 DATA_PROXY_URL 时默认指向本机 8899（proxy_server.py 默认端口）。
+    const cache = await loadFundEstimates();
+    const e = cache && cache[code];
+    if(e && e.estNav != null){
+      const prevNav = (e.prevNav && e.prevNav>0) ? e.prevNav : e.nav;
+      return {code, name:(e.name||''), price:e.estNav, last_close:e.nav,
+        change_amt:+(e.estNav - e.nav).toFixed(4), change_pct:(e.estChgPct!=null?e.estChgPct:0),
+        amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+        est:!e.isOfficial, isOfficial:!!e.isOfficial, estMethod:'gh-action', isQDII:!!e.isQDII,
+        isToday:true, navDate:e.navDate, gztime:(e.estTime||'') };
+    }
+  }catch(e){}
+  // 回退：本地代理取数（仅本地运行 proxy_server.py 且配置了 DATA_PROXY_URL 的用户）
+  try{
     const navData = await getNavFromProxy(code, '__fundnav_'+code);
     if(!navData || !(navData.nav>0)) return null;
     const navNow0 = navData.nav;
@@ -4639,6 +4673,21 @@ function fundNavJsonp(code){
   });
 }
 async function fetchFundNav(code){
+  // 优先：云端提交的 fund_estimates.json（官方净值，与页面同源）
+  try{
+    const cache = await loadFundEstimates();
+    const e = cache && cache[code];
+    if(e && e.nav>0){
+      const prevNav = (e.prevNav && e.prevNav>0) ? e.prevNav : e.nav;
+      const change_pct = (e.estChgPct!=null) ? e.estChgPct
+                         : (prevNav>0 ? +((e.nav-prevNav)/prevNav*100).toFixed(2) : 0);
+      return {code, name:(e.name||''), price:e.nav, last_close:prevNav,
+        change_amt:+(e.nav-prevNav).toFixed(4), change_pct,
+        amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+        isOfficial:true, est:false, navDate:e.navDate, isToday:(e.navDate===todayStr()), isFundGz:false, gztime:e.navDate };
+    }
+  }catch(e){}
+  // 回退：本地代理取数（仅本地配置 DATA_PROXY_URL 的用户）
   const today=todayStr();
   const cacheKey='fundnav_v2_'+code+'_'+today;
   try{

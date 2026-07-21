@@ -1,0 +1,37 @@
+name: Fund Estimate Update
+
+# 云端定时计算场外基金当日估算收益，结果提交 fund_estimates.json，供 GitHub Pages 页面直接读取。
+# 解决：天天基金/东财基金接口校验 Referer，纯静态页面无法在浏览器跨域获取，必须有服务端代理。
+# 这里用 GitHub Actions（固定公网出口、可自由设置 Referer）替代“本地代理”，实现零本地、零脚本的公网直用。
+on:
+  schedule:
+    # 交易时段 + 缓冲（北京 09:00–15:55，UTC 01:00–07:55），每 5 分钟更新一次盘中估算
+    - cron: '*/5 1-7 * * 1-5'
+    # 收盘后抓取当日正式净值（北京 17:03–18:53，UTC 09:03–10:53）
+    - cron: '3,13,23,33,43,53 9-10 * * 1-5'
+  workflow_dispatch: {}   # 允许在 Actions 页面手动触发
+
+permissions:
+  contents: write        # 允许 GITHUB_TOKEN 把更新后的 fund_estimates.json 推回仓库
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate fund estimates
+        run: python3 gen_fund_estimate.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add fund_estimates.json
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "chore: update fund estimates"
+            git push
+          fi
