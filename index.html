@@ -4485,46 +4485,102 @@ async function fetchFundGz(code, allowEst){
 // 数据：pingzhongdata（最新官方净值 + 前十大持仓 + 股票占净比，iframe 加载，按日缓存避免每秒重拉 700KB+）
 //       push2delay（持仓股实时价/昨收算涨跌幅，浏览器 CORS 可用，复用 fetchEmQuote）
 // 说明：个股权重无法免费获取，采用等权近似；债券/现金近似持平。属近似估算，标签标注「自建估」。
+// ============ 场外基金：稳健数据层（替代已失效的 pingzhongdata）============
+// 数据源（均经本地代理 DATA_PROXY_URL 转发，服务端加 eastmoney Referer，绕过浏览器直连的 Referer 校验）：
+//   · 官方净值：api.fund.eastmoney.com/f10/lsjz  (JSONP callback=)
+//   · 前十大持仓：fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc  (script var apidata)
+//   · 持仓股实时涨跌：push2delay.eastmoney.com  (jsonpGet，复用 fetchEmQuote，无需代理)
+// 说明：api.fund / fundf10 校验 Referer（非 eastmoney 域返回 ErrCode:-999），浏览器直连被拒，必须走代理。
+//       push2delay 不校验 Referer，可直接 JSONP。若未配置代理(DATA_PROXY_URL)，估算/官方净值均不可用，
+//       页面标注「估算暂不可用」并提示配置代理。
+// 关键假设：用前十大持仓「占净值比例」之和反推股票占净比（前十大通常约占股票仓位 60-62%），用于缩放估算涨跌幅。
+
+function toSecid(code){ return /^6/.test(code) ? '1.'+code : '0.'+code; }
+function fundProxyUrl(host, path){
+  // 未手动配置代理时，默认尝试本机 8899（proxy_server.py 默认端口），
+  // 这样“只要本地运行了 proxy_server.py”即可直接使用，无需额外配置。
+  const base = (DATA_PROXY_URL && DATA_PROXY_URL.trim()) ? DATA_PROXY_URL.replace(/\/$/,'') : 'http://localhost:8899';
+  return base + '/proxy?host=' + encodeURIComponent(host) + '&path=' + encodeURIComponent(path);
+}
+// 官方净值（JSONP，走代理）。返回 {nav, prevNav, navDate, change_pct, change_amt, fundType}
+async function getNavFromProxy(code, cbName){
+  const path = '/f10/lsjz?fundCode='+encodeURIComponent(code)+'&pageIndex=1&pageSize=2';
+  const url = fundProxyUrl('api.fund.eastmoney.com', path);
+  if(!url) return null;
+  const d = await jsonpGet(url, cbName, 15000);
+  const list = d && d.Data && d.Data.LSJZList;
+  if(!list || !list.length) return null;
+  const last = list[0]||{}, prev = list[1]||{};
+  const nav = parseFloat(last.DWJZ), prevNav = parseFloat(prev.DWJZ)||nav;
+  if(!(nav>0)) return null;
+  const navDate = (last.FSRQ||'').slice(0,10);
+  const change_pct = isNaN(parseFloat(last.JZZZL)) ? (prevNav? +((nav-prevNav)/prevNav*100).toFixed(2):0) : parseFloat(last.JZZZL);
+  const change_amt = +(nav-prevNav).toFixed(4);
+  const fundType = (d.Data&&d.Data.FundType)||'';
+  return {nav, prevNav, navDate, change_pct, change_amt, fundType};
+}
+// 前十大持仓（script var apidata，走代理）。返回 {holdings:[{code,weight}], fundName}
+async function getHoldingsFromProxy(code){
+  const y = new Date().getFullYear();
+  const quarters = [[y,6],[y,3],[y-1,12],[y-1,9],[y,9],[y,12]];
+  for(const [yy,mm] of quarters){
+    const path = '/FundArchivesDatas.aspx?type=jjcc&code='+encodeURIComponent(code)+'&year='+yy+'&month='+mm;
+    const url = fundProxyUrl('fundf10.eastmoney.com', path);
+    if(!url) return {holdings:[], fundName:''};
+    let apidata = null;
+    try{
+      apidata = await new Promise((resolve,reject)=>{
+        const prev = window.apidata; window.apidata = undefined;
+        const s=document.createElement('script');
+        const t=setTimeout(()=>{ if(s.parentNode) s.remove(); window.apidata=prev; reject(new Error('timeout')); },15000);
+        s.onerror=()=>{ if(s.parentNode) s.remove(); window.apidata=prev; reject(new Error('script error')); };
+        s.onload=()=>{ clearTimeout(t); const a=window.apidata; window.apidata=prev; if(s.parentNode) s.remove(); resolve(a); };
+        s.src=url; document.head.appendChild(s);
+      });
+    }catch(e){ apidata=null; }
+    if(apidata && apidata.content){
+      const holdings = parseHoldings(apidata.content);
+      const fundName = (apidata.content.match(/title='([^']+)'/)||[])[1]||'';
+      if(holdings.length) return {holdings, fundName};
+    }
+  }
+  return {holdings:[], fundName:''};
+}
+function parseHoldings(html){
+  const out=[];
+  const trRe=/<tr>([\s\S]*?)<\/tr>/g; let trm;
+  while((trm=trRe.exec(html))){
+    const row=trm[1];
+    const code=(row.match(/(\d{6})/)||[])[1];
+    const pctM=row.match(/(\d+\.\d+)%/);
+    const pct=pctM?parseFloat(pctM[1]):0;
+    if(code && pct>0) out.push({code, weight:pct});
+  }
+  return out;
+}
 async function estimateFundGz(code){
   try{
-    const navData = await getPzd(code);   // {arr,name,stockCodesNew,assetAlloc,sharesPos}（按日缓存）
-    const arr = navData && navData.arr;
-    if(!arr || !arr.length) return null;
-    const last = arr[arr.length-1];
-    const navNow0 = Array.isArray(last) ? parseFloat(last[1]) : parseFloat(last.y);
-    if(!(navNow0>0)) return null;
-    // 股票占净比%（资产配置中名称含“股票”的序列最新值）
-    let stockPct = 0;
-    const alloc = navData.assetAlloc;
-    if(alloc && alloc.series){
-      const s0 = (alloc.series||[]).find(s=>/股票/.test(s.name||'')) || alloc.series[0];
-      if(s0 && s0.data && s0.data.length){
-        const v = s0.data[s0.data.length-1];
-        stockPct = (typeof v==='object' ? (v.y!==undefined?v.y:v.value) : v) || 0;
-      }
-    }
-    if(!(stockPct>0) && navData.sharesPos){
-      const sp = navData.sharesPos;
-      const a2 = sp.series ? (sp.series[0]&&sp.series[0].data) : (Array.isArray(sp)?sp:null);
-      if(a2 && a2.length){ const v=a2[a2.length-1]; stockPct=(typeof v==='object'?(v.y!==undefined?v.y:v.value):v)||0; }
-    }
-    if(!(stockPct>0)) return null;   // 拿不到股票仓位，无法估算 → null，由上层兜底
-    const secids = (navData.stockCodesNew||[]).slice(0,10);
-    if(!secids.length) return null;
-    const chgs = await Promise.all(secids.map(async sid=>{ const q=await estQuote(sid); return q?(q.change_pct||0):null; }));
+    // NAV/持仓必须走本地代理（api.fund/fundf10 校验 Referer，浏览器直连被拒）。
+    // fundProxyUrl 在未配置 DATA_PROXY_URL 时默认指向本机 8899（proxy_server.py 默认端口）。
+    const navData = await getNavFromProxy(code, '__fundnav_'+code);
+    if(!navData || !(navData.nav>0)) return null;
+    const navNow0 = navData.nav;
+    const hd = await getHoldingsFromProxy(code);
+    const holdings = hd.holdings;
+    if(!holdings.length) return null;
+    const topW = holdings.reduce((a,h)=>a+(h.weight||0),0);
+    const stockPct = Math.max(0, Math.min(100, topW/0.62));   // 反推股票占净比
+    const chgs = await Promise.all(holdings.map(async h=>{ const q=await estQuote(toSecid(h.code)); return q?(q.change_pct||0):null; }));
     const valid = chgs.filter(x=>x!==null && !isNaN(x));
     if(!valid.length) return null;
-    const avgChg = valid.reduce((a,b)=>a+b,0)/valid.length;          // 前十大持仓等权平均涨跌幅%
-    const estChgPct = +(stockPct/100 * avgChg).toFixed(2);           // 估算基金当日涨跌幅%
+    const wSum = topW||1;
+    const wAvg = holdings.reduce((a,h,i)=> a + (h.weight||0)*(chgs[i]||0), 0)/wSum;   // 前十大按权重加权平均
+    const estChgPct = +(stockPct/100 * wAvg).toFixed(2);
     const estNav = +(navNow0 * (1 + estChgPct/100)).toFixed(4);
-    const navDate = arrDateStr(last);
-    if(navDate && navNow0>0) setFundHistCache(code, navDate, navNow0); // 落库官方净值，供盘后算真实涨幅
-    const estIsQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外/.test((navData.name||''));
-    return {code, name:(navData.name||''),
-      price:estNav, last_close:navNow0, change_amt:+(estNav-navNow0).toFixed(4), change_pct:estChgPct,
-      amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
-      est:true, isOfficial:false, estMethod:'holdings', isQDII:estIsQDII,
-      isToday:true, navDate, gztime:'' };
+    if(navData.navDate && navNow0>0) setFundHistCache(code, navData.navDate, navNow0);
+    const isQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外/.test((hd.fundName||'')+' '+(navData.fundType||''));
+    return {code, name:(hd.fundName||''), price:estNav, last_close:navNow0, change_amt:+(estNav-navNow0).toFixed(4), change_pct:estChgPct,
+      amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0, est:true, isOfficial:false, estMethod:'holdings', isQDII, isToday:true, navDate:navData.navDate, gztime:'' };
   }catch(e){ console.error('estimateFundGz',e); return null; }
 }
 const _pzdCache = {};   // code -> {date, data}：pingzhongdata 按日缓存（持仓/配置/基础净值每日才变）
@@ -4599,34 +4655,17 @@ async function fetchFundNav(code){
     }
   }catch(e){}
   try{
-    const navData = await fundNavJsonp(code);   // 返回本脚本捕获的 {arr, name}，避免共享全局串数据
-    const arr = navData && navData.arr;
-    const name = (navData && navData.name) || '';
-    if(!arr || !arr.length) return null;
-    const last = arr[arr.length-1];
-    const prev = arr.length>1 ? arr[arr.length-2] : last;
-    let nav, prevNav, rate, ts, prevTs;
-    if(Array.isArray(last)){            // 旧格式 [[时间戳ms, 单位净值, 累计净值, 日增长率], ...]
-      nav = parseFloat(last[1]); prevNav = parseFloat(prev[1])||nav; rate = parseFloat(last[3]); ts = Number(last[0]); prevTs = Number(prev[0]);
-    }else{                              // 新格式 [{x:时间戳ms, y:单位净值, equityReturn:日增长率%, unitMoney}, ...]
-      nav = parseFloat(last.y); prevNav = parseFloat(prev.y)||nav; rate = parseFloat(last.equityReturn); ts = Number(last.x); prevTs = Number(prev.x);
-    }
-    const d = new Date(ts);
-    const navDate = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-    const prevD = new Date(prevTs);
-    const prevDate = prevD.getFullYear()+'-'+String(prevD.getMonth()+1).padStart(2,'0')+'-'+String(prevD.getDate()).padStart(2,'0');
-    if(navDate && nav>0) setFundHistCache(code, navDate, nav);                 // 把官方净值序列落库，后续可用 fundgz 单独算真实涨幅
-    if(prevDate && prevNav>0 && prevDate!==navDate) setFundHistCache(code, prevDate, prevNav);
-    const change_pct = isNaN(rate) ? (prevNav? +((nav-prevNav)/prevNav*100).toFixed(2):0) : rate;
-    const change_amt = +(nav-prevNav).toFixed(4);
+    const nd = await getNavFromProxy(code, '__fundnav2_'+code);   // 经本地代理取官方净值（api.fund lsjz）
+    if(!nd || !(nd.nav>0)) return null;
+    if(nd.navDate && nd.nav>0) setFundHistCache(code, nd.navDate, nd.nav);
     const result = {
-      code, name, price:nav, last_close:prevNav,
-      change_amt, change_pct,
+      code, name:'', price:nd.nav, last_close:nd.prevNav,
+      change_amt:nd.change_amt, change_pct:nd.change_pct,
       amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
-      isOfficial:true, est:false, navDate, isToday: navDate===today,
-      isFundGz:false, gztime:navDate
+      isOfficial:true, est:false, navDate:nd.navDate, isToday: nd.navDate===today,
+      isFundGz:false, gztime:nd.navDate
     };
-    try{ localStorage.setItem(cacheKey, JSON.stringify({price:nav,last_close:prevNav,change_amt,change_pct,name,navDate,isToday:navDate===today, isOfficial:true, fetchedAt:Date.now()})); }catch(e){}
+    try{ localStorage.setItem(cacheKey, JSON.stringify({price:nd.nav,last_close:nd.prevNav,change_amt:nd.change_amt,change_pct:nd.change_pct,name:'',navDate:nd.navDate,isToday:nd.navDate===today,isOfficial:true,fetchedAt:Date.now()})); }catch(e){}
     return result;
   }catch(e){ console.error('fundNav',e); return null; }
 }

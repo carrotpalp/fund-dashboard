@@ -21,6 +21,12 @@ import urllib.parse
 
 PORT = 8899
 DEFAULT_HOST = 'push2.eastmoney.com'
+# eastmoney 部分接口校验 Referer（非 eastmoney 域返回 ErrCode:-999），按 host 指定合法 Referer 以通过校验。
+# api.fund / fundf10 需要 fundf10.eastmoney.com 域的 Referer；其余（push2 等）用 quote.eastmoney.com。
+REFERERS = {
+    'api.fund.eastmoney.com': 'http://fundf10.eastmoney.com/',
+    'fundf10.eastmoney.com': 'http://fundf10.eastmoney.com/',
+}
 
 
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -50,19 +56,25 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(400, 'path required')
             return
 
-        # 把前端 callback 写入转发的 path，确保返回的 JSONP 能被前端正确执行
+        # 把前端 callback 写入转发的 path，确保返回的 JSONP 能被前端正确执行。
+        # 注意：api.fund.eastmoney.com 的 JSONP 参数名是 callback=，其余（push2 等）用 cb=，按 host 区分。
         if cb:
             if 'cb=' in path or 'callback=' in path:
                 path = re.sub(r'[?&](cb|callback)=[^&]*', '', path)
-            path = path + ('&' if '?' in path else '?') + 'cb=' + urllib.parse.quote(cb, safe='')
+            sep = '&' if '?' in path else '?'
+            if host == 'api.fund.eastmoney.com':
+                path = path + sep + 'callback=' + urllib.parse.quote(cb, safe='')
+            else:
+                path = path + sep + 'cb=' + urllib.parse.quote(cb, safe='')
 
+        referer = REFERERS.get(host, 'https://quote.eastmoney.com/')
         target = f'https://{host}{path}'
         try:
             req = urllib.request.Request(
                 target,
                 headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Referer': 'https://quote.eastmoney.com/',
+                    'Referer': referer,
                     'Accept': '*/*',
                 }
             )
