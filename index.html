@@ -266,6 +266,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
 .wl-units:disabled{opacity:.4;cursor:not-allowed}
 .wl-num{font-family:var(--mono);text-align:right;white-space:nowrap}
 .wl-est{font-size:9px;color:var(--text-3);margin-left:3px}
+.wl-est-fail{color:#fbbf24;border:1px solid #fbbf24;border-radius:3px;padding:0 3px}
 /* 自选标的类型标签（色相拉开、饱和度协调，确保在深浅主题下都易区分） */
 .wl-tag{display:inline-block;font-size:9px;line-height:16px;padding:0 5px;border-radius:3px;margin-left:4px;font-weight:700;vertical-align:middle;white-space:nowrap;border:1px solid rgb(from var(--text-white) r g b /.25);text-shadow:0 1px 1px rgb(from var(--shadow) r g b /.25)}
 .wl-tag.t-otc{background:#4f46e5;color:#fff}    /* 场外 · 靛蓝 */
@@ -617,6 +618,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
 }
 </style>
 <script>(function(){ try{ if(localStorage.getItem('ashare_theme_v1')==='light') document.documentElement.classList.add('light'); }catch(e){} })();</script>
+<script src="plotly.min.js" defer></script>
 </head>
 <body>
 <div id="loadingOverlay">
@@ -3547,6 +3549,7 @@ function cumPl(w){ if(!costEntered(w) || !w.q || !(w.q.price>0)) return null; re
 // 场外基金净值徽标：QDII 等特殊类型标注对应净值日期，避免用户误读“闪跳的估算”
 function fundTag(q){
   if(!q) return '';
+  if(q.estFailed) return '<span class="wl-est wl-est-fail">估算暂不可用</span>';       // 盘中估算取数失败（跨域/超时）：已降级为官方净值
   const d = (q.navDate||'').slice(5);                 // MM-DD
   if(q.isQDII && q.est && d) return '<span class="wl-est">估·'+d+'</span>';            // QDII 盘中估算：标注相对净值日期（多滞后到上一交易日）
   if(q.isQDII && q.isOfficial && !q.isToday && d) return '<span class="wl-est">官方·'+d+'</span>'; // QDII 官方净值滞后：标注其真实披露日期
@@ -4516,10 +4519,11 @@ async function estimateFundGz(code){
     const estNav = +(navNow0 * (1 + estChgPct/100)).toFixed(4);
     const navDate = arrDateStr(last);
     if(navDate && navNow0>0) setFundHistCache(code, navDate, navNow0); // 落库官方净值，供盘后算真实涨幅
+    const estIsQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外/.test((navData.name||''));
     return {code, name:(navData.name||''),
       price:estNav, last_close:navNow0, change_amt:+(estNav-navNow0).toFixed(4), change_pct:estChgPct,
       amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
-      est:true, isOfficial:false, estMethod:'holdings',
+      est:true, isOfficial:false, estMethod:'holdings', isQDII:estIsQDII,
       isToday:true, navDate, gztime:'' };
   }catch(e){ console.error('estimateFundGz',e); return null; }
 }
@@ -4719,6 +4723,13 @@ async function refreshWatchlist(){
         let gz = await fetchFundGz(w.code, true);   // allowEst=true
         if(!gz) gz = await fetchFundGz(w.code, true);   // 偶发超时/限流，重试一次
         if(gz){ fundGzCache[w.code] = gz; q = gz; }
+        else {
+          // 估算取数失败（持仓/报价跨域被拦截或超时）：优雅降级为官方净值并标注，避免静默“—”
+          if(!w.q || !(w.q.price>0)){
+            const nav = await fetchFundNav(w.code);
+            if(nav){ nav.estFailed = true; q = nav; }
+          } else if(w.q){ w.q.estFailed = true; }
+        }
       } else if(fundGzCache[w.code]){
         q = fundGzCache[w.code];
       }
