@@ -1132,7 +1132,7 @@ function tencentScript(codes){
       resolve(res);
     };
     s.charset = 'gbk'; // 腾讯返回GBK，强制按GBK解码避免中文乱码
-    s.src = 'https://qt.gtimg.cn/q=' + codes.join(',');
+    s.src = 'https://qt.gtimg.cn/q=' + codes.join(',') + '&_=' + Date.now();  // 加缓存破坏戳：避免浏览器缓存脚本响应导致港股/A股实时报价冻结
     document.body.appendChild(s);
   });
 }
@@ -3554,7 +3554,7 @@ function fundTag(q){
   const d = (q.navDate||'').slice(5);                 // MM-DD
   if(q.isQDII && q.est && d) return '<span class="wl-est">估·'+d+'</span>';            // QDII 盘中估算：标注相对净值日期（多滞后到上一交易日）
   if(q.isQDII && q.isOfficial && !q.isToday && d) return '<span class="wl-est">官方·'+d+'</span>'; // QDII 官方净值滞后：标注其真实披露日期
-  if(q.est && q.estMethod==='holdings') return '<span class="wl-est">自建估</span>';  // 自建持仓估算（替代已下线的天天基金接口）
+  if(q.est && q.estMethod==='holdings') return '<span class="wl-est">估</span>';  // 自建持仓估算（替代已下线的天天基金接口）
   if(q.est) return '<span class="wl-est">估</span>';
   return '';
 }
@@ -4486,7 +4486,7 @@ async function fetchFundGz(code, allowEst){
 // 思路：估算涨幅 ≈ 股票占净比% × 前十大持仓股等权平均实时涨跌幅；估算净值 = 最新官方净值 × (1 + 估算涨幅)
 // 数据：pingzhongdata（最新官方净值 + 前十大持仓 + 股票占净比，iframe 加载，按日缓存避免每秒重拉 700KB+）
 //       push2delay（持仓股实时价/昨收算涨跌幅，浏览器 CORS 可用，复用 fetchEmQuote）
-// 说明：个股权重无法免费获取，采用等权近似；债券/现金近似持平。属近似估算，标签标注「自建估」。
+// 说明：个股权重无法免费获取，采用等权近似；债券/现金近似持平。属近似估算，标签标注「估」。
 // ============ 场外基金：稳健数据层（替代已失效的 pingzhongdata）============
 // 数据源（均经本地代理 DATA_PROXY_URL 转发，服务端加 eastmoney Referer，绕过浏览器直连的 Referer 校验）：
 //   · 官方净值：api.fund.eastmoney.com/f10/lsjz  (JSONP callback=)
@@ -4610,7 +4610,28 @@ async function estimateFundGz(code){
             est:false, isOfficial:true, estMethod:'pzd-official', isQDII:true,
             isToday:(navDate===todayStr()), navDate, gztime:navDate };
         }
-        // 非 QDII：自建估算（前十大持仓股实时涨跌 × 股票占净比；个股权重不可免费得，等权近似）
+        // 非 QDII：生命周期——「估」仅在“已开盘的交易日”且“今日正式净值尚未披露”时展示；
+        //   · 今日正式净值已披露(navDate===今日) → 展示官方，覆盖「收盘后→官方披露→次交易日开盘前」整段；
+        //   · 盘前/非交易日(未开盘)        → 展示上一交易日官方净值，不展示估；
+        //   · 盘中且官方未披露              → 前十大持仓实时涨跌 × 股票占净比 估算（个股权重不可免费得，等权近似）。
+        const tday = todayStr();
+        if(navDate === tday){
+          // 今日正式净值已出 → 官方，直到次交易日开盘前都保持官方（不再估）
+          return {code, name, price:nav, last_close:prevNav, change_amt:chgAmt, change_pct:chgPct,
+            amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+            est:false, isOfficial:true, estMethod:'pzd-official', isQDII:false,
+            isToday:true, navDate, gztime:navDate };
+        }
+        const dNow = new Date();
+        const sessionStarted = isTradingDayNow(dNow) && (dNow.getHours()*60 + dNow.getMinutes()) >= 570;  // 09:30 后视为已开盘
+        if(!sessionStarted){
+          // 盘前 / 周末节假日 → 展示上一交易日官方净值，等开盘后再估
+          return {code, name, price:nav, last_close:prevNav, change_amt:chgAmt, change_pct:chgPct,
+            amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+            est:false, isOfficial:true, estMethod:'pzd-official', isQDII:false,
+            isToday:(navDate===tday), navDate, gztime:navDate };
+        }
+        // 盘中且官方未披露 → 自建估算
         let stockPct = 90;
         if(pd.sharesPos && pd.sharesPos.length){
           const sp = pd.sharesPos[pd.sharesPos.length-1];
@@ -4636,7 +4657,7 @@ async function estimateFundGz(code){
         return {code, name, price:nav, last_close:prevNav, change_amt:chgAmt, change_pct:chgPct,
           amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
           est:false, isOfficial:true, estFailed:true, estMethod:'pzd-fallback', isQDII:false,
-          isToday:(navDate===todayStr()), navDate, gztime:navDate };
+          isToday:(navDate===tday), navDate, gztime:navDate };
       }
     }
   }catch(e){ console.warn('estimateFundGz client-side', code, e); }
