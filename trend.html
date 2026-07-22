@@ -153,6 +153,7 @@
   <!-- 5步复盘清单 -->
   <div class="card">
     <h2>极简实战复盘清单 <span class="tag">按顺序检查，缺 2 条以上 → 观望/小仓</span></h2>
+    <p class="src" style="margin:0 0 8px">规则：<b style="color:var(--green)">勾选 = 该项通过（绿灯，可动手）</b>；<b style="color:var(--red)">未勾 = 不通过（红灯，回避）</b>。系统已按实时数据自动判定，你可手动修改任意项。</p>
     <div id="checklist"></div>
     <div class="verdict-box" id="checkVerdict" style="margin-top:12px">勾选后自动给结论</div>
   </div>
@@ -263,26 +264,25 @@ async function fetchPrice(secid){
 }
 
 /* 大盘赚钱效应：拉全 A股（沪深京）按涨跌幅排序，算中位数 + 涨/跌占比 + 总成交额。
-   数据源：push2(实时) → push2delay(延迟~15min) 兜底（同 index.html 主界面用过的同源）。 */
+   数据源：直接走 push2delay（与实时价同源，浏览器内已验证可用）；push2 实时端点在浏览器被拦截，不再尝试以免 15s 空等。 */
 async function fetchMarketBreadth(){
   const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
   const fields='f2,f3,f6,f12';
-  const pz=5000;
-  for(const host of ['push2.eastmoney.com','push2delay.eastmoney.com']){
-    try{
-      const url=`https://${host}/api/qt/clist/get?pn=1&pz=${pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=mcb&_=${Date.now()}`;
-      const d=await jsonpGet(url,'mcb');
-      const arr=d&&d.data&&d.data.diff;
-      if(!arr||!arr.length) continue;
-      const pct=arr.map(x=>x.f3/100).sort((a,b)=>a-b);
-      const n=pct.length;
-      const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
-      const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length;
-      const totAmt=arr.reduce((s,x)=>s+(x.f6||0),0);
-      return {median, up, dn, total:n, upPct:up/n*100, totAmt, source:host};
-    }catch(e){ /* 试下一个 host */ }
-  }
-  return null;
+  const pz=6000; // 覆盖全市场(总约5540只)，避免抽样偏差
+  const host='push2delay.eastmoney.com';
+  try{
+    const cb='mcb'+Math.random().toString(36).slice(2);
+    const url=`https://${host}/api/qt/clist/get?pn=1&pz=${pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}&_=${Date.now()}`;
+    const d=await jsonpGet(url, cb);
+    const arr=d&&d.data&&d.data.diff;
+    if(!arr||!arr.length) return null;
+    const pct=arr.map(x=>x.f3/100).sort((a,b)=>a-b);
+    const n=pct.length;
+    const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
+    const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length;
+    const totAmt=arr.reduce((s,x)=>s+(x.f6||0),0);
+    return {median, up, dn, total:n, upPct:up/n*100, totAmt, source:host};
+  }catch(e){ return null; }
 }
 
 /* ============ 指标计算 ============ */
@@ -754,10 +754,12 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
 }
 
 /* ---- 5步复盘清单 ---- */
+/* 语义约定：勾选 = 该项通过（绿灯，可动手）；未勾 = 不通过（红灯，回避）。
+   系统已按实时数据自动判定每项勾选/不勾；仅当数据真取不到时才给出手动校验指引。 */
 const CHECKS=[
   {
-    t:'大盘赚钱效应（个股涨跌中位数）好不好？系统性风险大不大？',
-    n:'A股个股涨跌中位数、全市场成交额',
+    t:'① 大盘环境友好吗？(赚钱效应) — 勾=上涨占比≥45%且成交活跃；不勾=系统性风险大',
+    n:'自动取：全市场涨跌中位数 + 上涨家数占比 + 总成交额(push2delay)',
     // 返回 true(勾) / false(不勾) / 'manual'(需手动)
     judge:()=>{
       const m=STATE.market;
@@ -772,7 +774,7 @@ const CHECKS=[
     }
   },
   {
-    t:'赛道基本面有没有边际改善？还是仅短期消息刺激？',
+    t:'② 赛道基本面在改善吗？(非纯消息刺激) — 勾=结构持续抬升+研报密集；不勾=仅短线脉冲',
     n:'数据驱动：价格结构持续性(持续天数/创新高/量能) + 研报数量(尽力)',
     judge:()=>{
       if(!STATE.klines) return 'manual';
@@ -789,7 +791,7 @@ const CHECKS=[
     }
   },
   {
-    t:'指数估值处于高位还是低位？赔率如何？',
+    t:'③ 估值贵不贵？(赔率) — 勾=价格/估值分位<75%；不勾=高位警惕',
     n:'对应 L2 价格分位（>75% 偏贵 · <35% 偏便宜）',
     judge:()=>{
       if(!STATE.klines) return 'manual';
@@ -812,7 +814,7 @@ const CHECKS=[
     }
   },
   {
-    t:'K线价格结构：是否结束下降趋势，高低点开始改善？',
+    t:'④ 价格走出下跌趋势了吗？ — 勾=高低点抬高+均线多头；不勾=仍在下降',
     n:'对应 L3 结构/HH-HL（含均线多头排列）',
     judge:()=>{
       if(!STATE.klines||!STATE._struc) return 'manual';
@@ -833,8 +835,8 @@ const CHECKS=[
     }
   },
   {
-    t:'最后核对 ETF 一级市场数据：份额、5日净申赎，并查折溢价排除套利干扰',
-    n:'对应 L4（折溢价 |x|≤3% 且非大幅净赎回）',
+    t:'⑤ 一级市场有套利干扰吗？ — 勾=折溢价≤3%且非大幅净赎回；不勾=高溢价/净赎回警惕',
+    n:'对应 L4（折溢价 |x|≤3% 且 近5日净申赎≥-5亿）',
     judge:()=>{
       if(STATE._prem==null) return 'manual';
       const premOk=Math.abs(STATE._prem)<=3;
