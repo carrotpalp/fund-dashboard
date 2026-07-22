@@ -54,6 +54,9 @@
   .chk input{margin-top:3px;width:15px;height:15px;accent-color:var(--blue)}
   .chk .lab{color:var(--txt)}
   .chk .note{color:var(--txt3);font-size:11px;display:block;margin-top:2px}
+  .chk .autoevi{margin-left:8px;font-size:11.5px;white-space:nowrap;align-self:center;flex-shrink:0}
+  .chk[data-manual="1"]{opacity:.65}
+  .chk[data-manual="1"] .lab{font-style:italic}
   table{width:100%;border-collapse:collapse;font-size:12px}
   th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt2)}
   th{color:var(--txt3);font-weight:500}
@@ -256,6 +259,29 @@ async function fetchPrice(secid){
   }catch(e){ return null; }
 }
 
+/* 大盘赚钱效应：拉全 A股（沪深京）按涨跌幅排序，算中位数 + 涨/跌占比 + 总成交额。
+   数据源：push2(实时) → push2delay(延迟~15min) 兜底（同 index.html 主界面用过的同源）。 */
+async function fetchMarketBreadth(){
+  const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
+  const fields='f2,f3,f6,f12';
+  const pz=5000;
+  for(const host of ['push2.eastmoney.com','push2delay.eastmoney.com']){
+    try{
+      const url=`https://${host}/api/qt/clist/get?pn=1&pz=${pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=mcb&_=${Date.now()}`;
+      const d=await jsonpGet(url,'mcb');
+      const arr=d&&d.data&&d.data.diff;
+      if(!arr||!arr.length) continue;
+      const pct=arr.map(x=>x.f3/100).sort((a,b)=>a-b);
+      const n=pct.length;
+      const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
+      const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length;
+      const totAmt=arr.reduce((s,x)=>s+(x.f6||0),0);
+      return {median, up, dn, total:n, upPct:up/n*100, totAmt, source:host};
+    }catch(e){ /* 试下一个 host */ }
+  }
+  return null;
+}
+
 /* ============ 指标计算 ============ */
 function MA(arr, n){
   const out=new Array(arr.length).fill(null);
@@ -421,7 +447,7 @@ function renderL1(code){
 }
 
 /* ============ 主流程 ============ */
-let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, l1checks:[false,false,false], hasK:false};
+let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, market:null, l1checks:[false,false,false], hasK:false, _struc:null};
 
 function parseShares(text){
   const out=[];
@@ -442,6 +468,7 @@ async function analyze(){
   try{ klines=await fetchKline(secid,200); }catch(e){ kErr=e; }
   try{ fund=await loadPzd(code); }catch(e){}
   try{ price=await fetchPrice(secid); }catch(e){}
+  try{ STATE.market=await fetchMarketBreadth(); }catch(e){ STATE.market=null; }
   STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.hasK=!!klines;
   STATE.l1checks=renderL1(code);
   document.getElementById('rag').innerHTML='';
@@ -458,6 +485,7 @@ async function analyze(){
     document.getElementById('l2body').innerHTML='<p class="src">K线缺失，赔率分位暂无法计算（需价格序列）。</p>';
     renderL4(klines, fund, price);
     computeRAG(null,null,null,null,null,null);
+    STATE._struc=null;
     const nm=(price&&price.name)||(fund&&fund.name)||code;
     document.getElementById('meta').innerHTML=`标的：<b>${nm}</b> · K线数据缺失，仅展示可用层（L1 基本面 / L4 资金）。`;
     renderChecklist();
@@ -470,6 +498,7 @@ async function analyze(){
   const kdj=KDJ(klines);
   const piv=pivots(klines,5);
   const struc=classifyStructure(piv);
+  STATE._struc=struc;
 
   // ---- L2 赔率（价格分位 vs 近52周） ----
   const win=Math.min(252, closes.length);
@@ -668,21 +697,129 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
 
 /* ---- 5步复盘清单 ---- */
 const CHECKS=[
-  {t:'大盘赚钱效应（个股涨跌中位数）好不好？系统性风险大不大？',n:'A股个股涨跌中位数、全市场成交额'},
-  {t:'赛道基本面有没有边际改善？还是仅短期消息刺激？',n:'产业 capex/订单/政策，而非一日游题材'},
-  {t:'指数估值处于高位还是低位？赔率如何？',n:'对应 L2 价格分位'},
-  {t:'K线价格结构：是否结束下降趋势，高低点开始改善？',n:'对应 L3 结构/HH-HL'},
-  {t:'最后核对 ETF 一级市场数据：份额、5日净申赎，并查折溢价排除套利干扰',n:'对应 L4'},
+  {
+    t:'大盘赚钱效应（个股涨跌中位数）好不好？系统性风险大不大？',
+    n:'A股个股涨跌中位数、全市场成交额',
+    // 返回 true(勾) / false(不勾) / 'manual'(需手动)
+    judge:()=>{
+      const m=STATE.market;
+      if(!m) return 'manual';
+      const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
+      return ok;
+    },
+    evi:()=>{
+      const m=STATE.market;
+      if(!m) return null;
+      return `中位 ${m.median>=0?'+':''}${m.median.toFixed(2)}% · 涨${m.up}/${m.down}（${m.upPct.toFixed(0)}%）· 成交 ${(m.totAmt/1e8).toFixed(0)}亿 · <span class="src">${m.source}</span>`;
+    }
+  },
+  {
+    t:'赛道基本面有没有边际改善？还是仅短期消息刺激？',
+    n:'产业 capex/订单/政策（系统无法判定，需你看新闻/调研/纪要）',
+    judge:()=>'manual',
+    evi:()=>'本项无可靠自动数据源，请基于近期产业新闻/订单/政策自行勾选'
+  },
+  {
+    t:'指数估值处于高位还是低位？赔率如何？',
+    n:'对应 L2 价格分位（>75% 偏贵 · <35% 偏便宜）',
+    judge:()=>{
+      if(!STATE.klines) return 'manual';
+      const closes=STATE.klines.map(k=>k.close);
+      const win=Math.min(252,closes.length);
+      const sl=closes.slice(closes.length-win);
+      const lo=Math.min(...sl), hi=Math.max(...sl);
+      const pct=hi===lo?50:(closes[closes.length-1]-lo)/(hi-lo)*100;
+      return pct<75;
+    },
+    evi:()=>{
+      if(!STATE.klines) return null;
+      const closes=STATE.klines.map(k=>k.close);
+      const win=Math.min(252,closes.length);
+      const sl=closes.slice(closes.length-win);
+      const lo=Math.min(...sl), hi=Math.max(...sl);
+      const pct=hi===lo?50:(closes[closes.length-1]-lo)/(hi-lo)*100;
+      const tag=pct<35?'低位':pct<75?'中位':'高位';
+      return `价格分位 ${pct.toFixed(0)}% · ${tag}（区间 ${lo.toFixed(2)}-${hi.toFixed(2)}）`;
+    }
+  },
+  {
+    t:'K线价格结构：是否结束下降趋势，高低点开始改善？',
+    n:'对应 L3 结构/HH-HL（含均线多头排列）',
+    judge:()=>{
+      if(!STATE.klines||!STATE._struc) return 'manual';
+      const closes=STATE.klines.map(k=>k.close);
+      const ma20=MA(closes,20), ma60=MA(closes,60);
+      const n=closes.length;
+      const maAligned=closes[n-1]>ma20[n-1]&&ma20[n-1]>ma60[n-1];
+      return STATE._struc==='uptrend' || (STATE._struc==='mixed' && maAligned);
+    },
+    evi:()=>{
+      if(!STATE.klines||!STATE._struc) return null;
+      const closes=STATE.klines.map(k=>k.close);
+      const ma20=MA(closes,20), ma60=MA(closes,60);
+      const n=closes.length;
+      const maAligned=closes[n-1]>ma20[n-1]&&ma20[n-1]>ma60[n-1];
+      const tag=STATE._struc==='uptrend'?'上升':STATE._struc==='downtrend'?'下降':'震荡';
+      return `结构 ${tag} · 均线${maAligned?'多头排列':'非多头'} · 收盘 ${closes[n-1].toFixed(3)}`;
+    }
+  },
+  {
+    t:'最后核对 ETF 一级市场数据：份额、5日净申赎，并查折溢价排除套利干扰',
+    n:'对应 L4（折溢价 |x|≤3% 且非大幅净赎回）',
+    judge:()=>{
+      if(STATE._prem==null) return 'manual';
+      const premOk=Math.abs(STATE._prem)<=3;
+      // 净申赎：正=申购(支持)，负=赎回(警惕)；用 |净申赎| < 5亿 或 净申购 都算过
+      const net=STATE._net5;
+      const netOk = (net!=null) ? (net>=-5) : true;
+      return premOk && netOk;
+    },
+    evi:()=>{
+      const prem=STATE._prem;
+      const net=STATE._net5;
+      const parts=[];
+      if(prem!=null) parts.push(`折溢价 ${prem>=0?'+':''}${prem.toFixed(2)}%`);
+      if(net!=null) parts.push(`5日净申赎 ${net>=0?'+':''}${net.toFixed(2)}亿份`);
+      if(!parts.length) return null;
+      const premOk=prem==null||Math.abs(prem)<=3;
+      const netOk=net==null||net>=-5;
+      parts.push(premOk&&netOk?'✓':'⚠ 套利/赎回风险');
+      return parts.join(' · ');
+    }
+  },
 ];
+
 function renderChecklist(){
   const el=document.getElementById('checklist'); el.innerHTML='';
   CHECKS.forEach((c,i)=>{
     const div=document.createElement('div'); div.className='chk';
-    div.innerHTML=`<input type="checkbox" data-chk="${i}"><span class="lab">${i+1}. ${c.t}<span class="note">${c.n}</span></span>`;
+    let autoVal=null; try{ autoVal=c.judge(); }catch(e){}
+    const manual=autoVal==='manual';
+    const autoChecked=autoVal===true;
+    div.innerHTML=`<input type="checkbox" data-chk="${i}" ${autoChecked?'checked':''} ${manual?'data-manual="1"':''}>
+      <span class="lab">${i+1}. ${c.t}<span class="note">${c.n}</span></span>
+      <span class="autoevi" id="chkevi${i}"></span>`;
+    if(manual) div.setAttribute('data-manual','1');
     el.appendChild(div);
   });
   el.querySelectorAll('input[data-chk]').forEach(inp=>{
+    inp.dataset.manual = inp.dataset.manual || '0';
     inp.addEventListener('change', updateCheckVerdict);
+  });
+  // 渲染依据
+  CHECKS.forEach((c,i)=>{
+    const ev=document.getElementById('chkevi'+i);
+    if(!ev) return;
+    let txt=null;
+    try{ txt=c.evi(); }catch(e){}
+    const isManual = c.judge && c.judge()==='manual';
+    if(isManual){
+      ev.innerHTML=`<span class="src" style="color:var(--amber)">⚠ 需你自判</span>`;
+    }else if(txt){
+      ev.innerHTML=`<span class="src">${txt}</span>`;
+    }else{
+      ev.innerHTML=`<span class="src">无依据</span>`;
+    }
   });
   updateCheckVerdict();
 }
