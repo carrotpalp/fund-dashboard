@@ -134,10 +134,10 @@
       <div>
         <div id="l4shares"></div>
         <div style="margin-top:10px">
-          <div style="font-size:12px;color:var(--txt2);margin-bottom:4px">份额序列（可粘贴维护，见下）</div>
-          <textarea id="sharesInput" placeholder="粘贴东方财富 ETF「份额变动」表：每行 日期,份额(亿份)&#10;例：&#10;2026-07-16,12.34&#10;2026-07-17,12.51&#10;2026-07-18,12.60"></textarea>
+          <div style="font-size:12px;color:var(--txt2);margin-bottom:4px">净流序列（默认自动获取，可粘贴覆盖）</div>
+          <textarea id="sharesInput" placeholder="默认自动填充近30日净流(亿份)；如需覆盖可编辑后点「应用份额序列」&#10;格式：日期,净流(亿份)"></textarea>
           <div style="margin-top:6px"><button id="applyShares" style="background:var(--panel2);border:1px solid var(--border);color:var(--txt);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px">应用份额序列</button>
-          <span class="src" style="margin-left:8px">留空则用实时折溢价判定；粘贴后自动算 5 日累计净申赎</span></div>
+          <span class="src" style="margin-left:8px">默认自动从净值文件取总份额+净申赎；编辑上方文本框后可点「应用」覆盖</span></div>
         </div>
       </div>
       <div>
@@ -155,7 +155,7 @@
   </div>
 
   <p class="src" style="text-align:center;padding:10px 0 30px">
-    数据来源：东方财富 push2his(K线) / pingzhongdata(净值) / push2delay(实时价) · 份额序列由用户维护以保证可追溯<br>
+    数据来源：东方财富 push2.eastmoney.com(K线) / pingzhongdata(净值+总份额+净申赎) / push2delay(实时价) · L4 资金数据全自动获取，无需手动粘贴<br>
     本报告/工具仅供参考，不构成个人投资建议。
   </p>
 </main>
@@ -214,7 +214,8 @@ function loadPzd(code){
     sc=document.createElement('script');
     sc.onload=()=>{ setTimeout(()=>{ try{
         const nw=window.netWorthTrend, name=window.fS_name;
-        cleanup(); resolve(name||(nw&&nw.length)?{name:name||'', netWorthTrend:nw||[]}:null);
+        const gt=window.Data_grandTotal, bs=window.Data_buySedemption;
+        cleanup(); resolve({name:name||'', netWorthTrend:nw||[], grandTotal:gt||null, buySed:bs||null});
       }catch(e){ cleanup(); resolve(null); } }, 600); };
     sc.onerror=()=>{ cleanup(); resolve(null); };
     sc.src=`https://fund.eastmoney.com/pingzhongdata/${code}.js?_=${Date.now()}`;
@@ -378,7 +379,8 @@ function renderL1(code){
   const p=L1_PROFILE[code];
   const body=document.getElementById('l1body');
   if(!p){
-    body.innerHTML=`<p class="src">未内置该 ETF 基本面画像，请按框架自行研判：</p>
+    const fn=STATE.fund&&STATE.fund.name?('（'+STATE.fund.name+'）'):'';
+    body.innerHTML=`<p class="src">未内置该 ETF 基本面画像${fn}，请按框架自行研判：</p>
       <div class="chk"><input type="checkbox" data-l1="0"><span class="lab">产业逻辑边际改善（订单/capex/政策）<span class="note">而非单纯短期消息刺激</span></span></div>
       <div class="chk"><input type="checkbox" data-l1="1"><span class="lab">无重大行业利空<span class="note">出口限制、需求断崖等</span></span></div>
       <div class="chk"><input type="checkbox" data-l1="2"><span class="lab">中长期方向向上<span class="note">区分反弹与反转</span></span></div>`;
@@ -396,7 +398,7 @@ function renderL1(code){
 }
 
 /* ============ 主流程 ============ */
-let STATE={klines:null, fund:null, price:null, shares:null, l1checks:[false,false,false], hasK:false};
+let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, l1checks:[false,false,false], hasK:false};
 
 function parseShares(text){
   const out=[];
@@ -502,17 +504,61 @@ function renderL3Lights(struc, macd, closes, ma20, ma60){
     <div class="sl"><span class="d" style="background:${macdBull?'var(--green)':'var(--red)'}"></span>MACD：${macdBull?'DIF>DEA(偏多)':'DIF<DEA(偏空)'}</div>`;
   document.getElementById('l3lights').innerHTML=html;
 }
+/* ---- L4 资金：全自动从 pingzhongdata 取总份额 + 净申赎（零额外跨域） ---- */
+function tsToDate(ts){ const d=new Date(ts); const p=n=>(''+n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+function parseGrandTotal(gt){
+  if(!gt || !gt.length || !gt[0].data || gt[0].data.length<2) return null;
+  const pts=gt[0].data.map(([ts,v])=>({t:ts, c:v})).sort((a,b)=>a.t-b.t);
+  const daily=pts.map((p,i)=>({d:tsToDate(p.t), s: i? +(p.c-pts[i-1].c).toFixed(2):0}));
+  const last=pts[pts.length-1].c, ref=pts[Math.max(0,pts.length-6)].c;
+  const net5=+(last-ref).toFixed(2); // 末日累计 − 6日前累计 = 近5交易日净申赎
+  return {daily, net5};
+}
+function totalShares(bs){
+  if(!bs || !bs.length) return null;
+  const row=bs.find(x=>x.name==='总份额');
+  if(!row || !row.data || !row.data.length) return null;
+  return +row.data[row.data.length-1];
+}
+function netFlowText(daily){
+  if(!daily||!daily.length) return '';
+  return daily.slice(-30).map(p=>p.d+','+p.s).join('\n');
+}
+function renderNetFlow(daily){
+  if(!daily || daily.length<2) return '<p class="src">无净流数据。</p>';
+  const W=440,H=150,pad=14;
+  const vals=daily.map(p=>p.s);
+  const yf=yScale(vals,H,pad); const x=i=> pad + i*(W-2*pad)/(daily.length-1);
+  let s='';
+  for(let g=0;g<=3;g++){ const yy=pad+g*(H-2*pad)/3; s+=`<line x1="${pad}" y1="${yy}" x2="${W-pad}" y2="${yy}" stroke="#222a33"/>`; }
+  if(Math.min(...vals)<=0&&Math.max(...vals)>=0){ s+=`<line x1="${pad}" y1="${yf(0)}" x2="${W-pad}" y2="${yf(0)}" stroke="#555" stroke-width="1"/>`; }
+  const bw=Math.max(1.5,(W-2*pad)/daily.length*0.6);
+  daily.forEach((p,i)=>{
+    const xx=x(i), yy=yf(p.s), y0=yf(0);
+    const col=p.s>=0?'#ef4444':'#22c55e'; // 净申购(流入)=红, 净赎回=绿
+    s+=`<rect x="${xx-bw/2}" y="${Math.min(yy,y0)}" width="${bw}" height="${Math.max(1,Math.abs(yy-y0))}" fill="${col}" opacity="0.8"/>`;
+  });
+  return svgWrap(s,W,H);
+}
 function renderL4(klines, fund, price){
   const body=document.getElementById('l4shares');
-  const series=STATE.shares;
-  let html=renderShares(series);
-  let net5=null, netTxt='待数据';
-  if(series && series.length>=6){
-    let d=0; for(let i=series.length-5;i<series.length;i++) d+=(series[i].s-series[i-1].s);
-    net5=d; netTxt=(d>=0?'+':'')+d.toFixed(2)+' 亿份';
+  // 自动提取（pingzhongdata 已加载）
+  let daily=null, net5=null, total=null;
+  if(fund && fund.grandTotal){ const g=parseGrandTotal(fund.grandTotal); if(g){ daily=g.daily; net5=g.net5; } }
+  if(fund && fund.buySed){ total=totalShares(fund.buySed); }
+  STATE.netFlow=daily; STATE.totalShares=total; STATE._net5=net5;
+  // 默认把自动数据填入文本框（用户编辑后点「应用」可覆盖；靠 dataset.touched 防回跑覆盖）
+  const ta=document.getElementById('sharesInput');
+  if(daily && !ta.dataset.touched) ta.value=netFlowText(daily);
+
+  let html='';
+  if(total!=null) html+=`<div class="kv"><span class="k">当前总份额</span><span class="v">${total.toFixed(2)} 亿份</span></div>`;
+  if(net5!=null){
+    const col=net5>0?'var(--green)':'var(--amber)';
+    const lab=net5>0?'净申购·资金流入 ✅':'净赎回/持平 ⚠';
+    html+=`<div class="kv"><span class="k">近5日净申赎</span><span class="v" style="color:${col}">${(net5>=0?'+':'')+net5.toFixed(2)} 亿份 · ${lab}</span></div>`;
   }
-  STATE._net5=net5;
-  html+=`<div class="kv" style="margin-top:6px"><span class="k">5日累计净申赎</span><span class="v">${netTxt}</span></div>`;
+  html+=`<div id="netflowchart" style="margin-top:8px">${renderNetFlow(daily)}</div>`;
   body.innerHTML=html;
 
   // 折溢价（实时）
@@ -531,7 +577,7 @@ function renderL4(klines, fund, price){
   }
   document.getElementById('l4premium').innerHTML=`<div style="font-size:12px;color:var(--txt2);margin-bottom:4px">实时折溢价（套利陷阱监测）</div>${premHtml}`;
   STATE._prem=prem;
-  document.getElementById('l4src').innerHTML=`<b>数据源</b>：折溢价＝现价(东财push2delay) ÷ 单位净值(pingzhongdata) − 1，实时；份额序列由用户粘贴维护（东方财富 ETF 页「份额变动」可复制）。`;
+  document.getElementById('l4src').innerHTML=`<b>数据源（全自动）</b>：当前总份额＝pingzhongdata「总份额」季报；近5日净申赎 / 净流图＝pingzhongdata 份额变动累计序列自动差分；折溢价＝现价(push2delay)÷单位净值−1（实时）。<b>无需手动粘贴</b>；如需覆盖，编辑上方文本框点「应用份额序列」。`;
 }
 
 /* ---- RAG 计算 ---- */
@@ -549,7 +595,7 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
     const L1=l1c===3?'green':(l1c>=1?'amber':'red');
     let L4='amber';
     if(STATE._prem!=null && Math.abs(STATE._prem)>3) L4='red';
-    else if(STATE.shares && STATE.shares.length>=6) L4=(STATE._net5>0)?'green':'amber';
+    else if(STATE.netFlow && STATE.netFlow.length>=2) L4=(STATE._net5>0)?'green':'amber';
     setRAG(0,'L1 基本面','方向锚',L1, L1==='green'?'偏多':L1==='amber'?'中性':'偏弱');
     setRAG(1,'L2 赔率','安全边际','gray','数据缺失');
     setRAG(2,'L3 价格趋势','趋势本体','gray','数据缺失');
@@ -577,7 +623,7 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
   const prem=STATE._prem;
   let L4;
   if(prem!=null && Math.abs(prem)>3) L4='red';
-  else if(STATE.shares && STATE.shares.length>=6){ L4 = (STATE._net5>0)?'green':'amber'; }
+  else if(STATE.netFlow && STATE.netFlow.length>=2){ L4 = (STATE._net5>0)?'green':'amber'; }
   else L4='amber';
 
   setRAG(0,'L1 基本面','方向锚',L1, L1==='green'?'偏多':L1==='amber'?'中性':'偏弱');
@@ -630,8 +676,13 @@ function updateCheckVerdict(){
 /* ---- 事件 ---- */
 document.getElementById('runBtn').addEventListener('click', analyze);
 document.getElementById('codeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') analyze(); });
+document.getElementById('sharesInput').addEventListener('input', ()=>{ document.getElementById('sharesInput').dataset.touched='1'; });
 document.getElementById('applyShares').addEventListener('click', ()=>{
-  STATE.shares=parseShares(document.getElementById('sharesInput').value);
+  const parsed=parseShares(document.getElementById('sharesInput').value);
+  if(parsed && parsed.length){
+    STATE.netFlow=parsed; STATE.totalShares=null;
+    STATE._net5=+(parsed.slice(-5).reduce((a,b)=>a+b.s,0)).toFixed(2);
+  }
   if(STATE.klines){ renderL4(STATE.klines, STATE.fund, STATE.price); recomputeRAGLite(); }
 });
 function recomputeRAGLite(){
@@ -641,8 +692,8 @@ function recomputeRAGLite(){
   const struc=classifyStructure(pivots(STATE.klines,5));
   const win=Math.min(252,closes.length); const sl=closes.slice(closes.length-win);
   const pct=(closes[closes.length-1]-Math.min(...sl))/(Math.max(...sl)-Math.min(...sl))*100;
-  // 重算 L4 net5
-  if(STATE.shares&&STATE.shares.length>=6){ let d=0; for(let i=STATE.shares.length-5;i<STATE.shares.length;i++) d+=(STATE.shares[i].s-STATE.shares[i-1].s); STATE._net5=d; }
+  // 重算 L4 net5（净流序列直接求和末5日）
+  if(STATE.netFlow&&STATE.netFlow.length>=2){ STATE._net5=+(STATE.netFlow.slice(-5).reduce((a,b)=>a+b.s,0)).toFixed(2); }
   computeRAG(pct, struc, macd, closes, ma20, ma60);
 }
 // 默认加载
