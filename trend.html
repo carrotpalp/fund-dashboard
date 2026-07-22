@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>四层趋势框架 · ETF 趋势判断工具</title>
+<title>四层趋势框架 · 趋势判断工具（ETF/场外基金/A股/港股）</title>
 <style>
   :root{
     --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --border:#2a313c;
@@ -82,11 +82,11 @@
 </head>
 <body>
 <header>
-  <h1>四层趋势框架 · ETF 趋势判断工具</h1>
+  <h1>四层趋势框架 · 趋势判断工具</h1>
   <div class="ctrl">
-    <input id="codeInput" value="159516" placeholder="ETF代码 如 159516">
+    <input id="codeInput" value="159516" placeholder="代码：ETF 159516 / 场外基金 110011 / A股 600519 / 港股 00700">
     <button id="runBtn">运行分析</button>
-    <span class="hint">默认：国泰半导体设备ETF(159516) · K线取自腾讯gtimg，净值/资金取自东方财富</span>
+    <span class="hint">支持：场内ETF·LOF、场外基金、A股、港股 · K线取自腾讯gtimg，净值/资金取自东方财富(pingzhongdata)</span>
   </div>
   <div class="meta" id="meta">输入代码后点击「运行分析」</div>
 </header>
@@ -159,8 +159,8 @@
   </div>
 
   <p class="src" style="text-align:center;padding:10px 0 30px">
-    数据来源：腾讯 gtimg(前复权K线) / pingzhongdata(净值+总份额+净申赎) / 东财push2delay(实时价) · L4 资金数据全自动获取，无需手动粘贴<br>
-    本报告/工具仅供参考，不构成个人投资建议。
+    数据来源：腾讯 gtimg(前复权K线，A股/ETF/港股) / pingzhongdata(净值历史+总份额+净申赎+持仓，ETF/场外基金) / 东财push2delay(实时价) · 场外基金直接以净值历史为价格序列（不依赖腾讯源）<br>
+    支持：场内ETF·LOF / 场外基金 / A股个股 / 港股个股 · 本报告/工具仅供参考，不构成个人投资建议。
   </p>
 </main>
 
@@ -171,6 +171,25 @@ function toSecid(code){
   if(/^\d+\.\d{6}$/.test(code)) return code;
   if(/^(51|56|58|50|55|59|60|68|90|5|9)/.test(code)) return '1.'+code; // 沪
   return '0.'+code; // 深 (00/15/16/18/30/11/12/13...)
+}
+/* 资产类型归一化：识别 港股(5位/hk前缀) / A股·ETF(6位) */
+function normalizeInput(raw){
+  let c=(raw||'').trim().toLowerCase().replace(/\s/g,'');
+  if(c.startsWith('hk')) return {isHK:true, market:'hk', code:c.slice(2).padStart(5,'0')};
+  if(/^\d{4,5}$/.test(c)) return {isHK:true, market:'hk', code:c.padStart(5,'0')};
+  if(/^\d{6}$/.test(c)) return {isHK:false, market:(/^[5-9]/.test(c)?'sh':'sz'), code:c};
+  return null; // 非法
+}
+/* 场外基金/ETF 兜底：用净值历史(pingzhongdata Data_netWorthTrend)当价格序列
+   格式 [{x:时间戳ms, y:单位净值}, ...]，与 gtimg K线结构对齐(open/close/high/low/vol) */
+function navSeries(fund){
+  const nw=fund&&fund.netWorthTrend;
+  if(!nw||!nw.length) return null;
+  const arr=nw.filter(p=>p&&p.y>0).map(p=>({
+    date:new Date(p.x).toISOString().slice(0,10),
+    open:p.y, close:p.y, high:p.y, low:p.y, vol:0, amount:0, amp:0, nav:p.y
+  }));
+  return arr.length?arr:null;
 }
 function jsonpGet(url, cbName){
   return new Promise((resolve,reject)=>{
@@ -184,51 +203,25 @@ function jsonpGet(url, cbName){
   });
 }
 // K线主源：腾讯 gtimg（web.ifzq.gtimg.cn）
-//   - 浏览器跨域可用（响应头 Access-Control-Allow-Origin: *），用 fetch 直取，无需 JSONP 封装
-//   - 复权口径(前复权)与实时价 push2delay 一致，末值对得上
-// 回退源：东财 push2（部分网络下可用，但曾出现返回空 klines，仅作兜底）
-const KLINE_HOSTS=[
-  'https://push2.eastmoney.com/api/qt/stock/kline/get',
-  'https://push2his.eastmoney.com/api/qt/stock/kline/get'
-];
-const EM_UT='fa5fd1943c7b386f172d6893dbfba10b';
-async function fetchKline(secid, limit){
-  const mkt = secid.startsWith('0.') ? 'sz' : 'sh';
-  const code = secid.split('.')[1];
-  // —— 主源：腾讯 gtimg（fetch + CORS *）——
-  try{
-    const url=`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mkt}${code},day,,,${limit},qfq`;
-    const ctrl=new AbortController();
-    const to=setTimeout(()=>ctrl.abort(),9000);
-    const r=await fetch(url,{signal:ctrl.signal});
-    clearTimeout(to);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const d=await r.json();
-    const node=d&&d.data ? (d.data[mkt+code]||d.data[code]||(Object.values(d.data)[0])) : null;
-    const arr=node ? (node.qfqday||node.day||null) : null;
-    if(arr && arr.length){
-      return arr.map(p=>({date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:0, amp:0}));
-    }
-    throw new Error('gtimg K线为空');
-  }catch(gErr){
-    // —— 回退：东财 push2（JSONP）——
-    let lastErr=gErr;
-    for(const host of KLINE_HOSTS){
-      try{
-        const cb='kcb'+Math.random().toString(36).slice(2);
-        const url=`${host}?secid=${secid}&ut=${EM_UT}&invt=2&fltt=2&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&end=20500101&lmt=${limit}&cb=${cb}`;
-        const d=await jsonpGet(url, cb);
-        if(d && d.data && d.data.klines && d.data.klines.length){
-          return d.data.klines.map(s=>{
-            const p=s.split(',');
-            return {date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:+p[6], amp:+(p[7]||0)};
-          });
-        }
-        lastErr=new Error('K线为空 ('+host.split('/')[2]+')');
-      }catch(e){ lastErr=e; }
-    }
-    throw lastErr;
+//   - 浏览器跨域可用（响应头 Access-Control-Allow-Origin: *，已用 curl 验证），fetch 直取
+//   - A股/ETF 用 fqkline(param=sz/sh+代码)；港股用 hkfqkline(param=hk+5位代码)
+//   - 东财 push2/push2his K线接口在浏览器返回空（已实测），废弃；ETF 失败兜底改走净值历史(navSeries)
+async function fetchKline(code, market, limit=200){
+  const param = market==='hk' ? `hk${code}` : `${market}${code}`;
+  const path = market==='hk' ? 'hkfqkline' : 'fqkline';
+  const url=`https://web.ifzq.gtimg.cn/appstock/app/${path}/get?param=${param},day,,,${limit},qfq`;
+  const ctrl=new AbortController();
+  const to=setTimeout(()=>ctrl.abort(),9000);
+  const r=await fetch(url,{signal:ctrl.signal});
+  clearTimeout(to);
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  const node=d&&d.data ? (d.data[param]||(Object.values(d.data)[0])) : null;
+  const arr=node ? (node.qfqday||node.day||null) : null;
+  if(arr && arr.length){
+    return arr.map(p=>({date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:0, amp:0}));
   }
+  throw new Error('gtimg K线为空');
 }
 function loadPzd(code){
   // 跨域可读机制：用 <script> 标签加载，pingzhongdata 会把 netWorthTrend/fS_name 等设为父窗口全局变量（可读）；
@@ -241,7 +234,8 @@ function loadPzd(code){
     sc.onload=()=>{ setTimeout(()=>{ try{
         const nw=window.Data_netWorthTrend, name=window.fS_name;
         const gt=window.Data_grandTotal, bs=window.Data_buySedemption;
-        cleanup(); resolve({name:name||'', netWorthTrend:nw||[], grandTotal:gt||null, buySed:bs||null});
+        const pos=window.Data_fundSharesPositions;
+        cleanup(); resolve({name:name||'', netWorthTrend:nw||[], grandTotal:gt||null, buySed:bs||null, positions:pos||null});
       }catch(e){ cleanup(); resolve(null); } }, 600); };
     sc.onerror=()=>{ cleanup(); resolve(null); };
     sc.src=`https://fund.eastmoney.com/pingzhongdata/${code}.js?_=${Date.now()}`;
@@ -249,16 +243,18 @@ function loadPzd(code){
   });
 }
 async function fetchPrice(secid){
+  if(!secid) return null;
   try{
     const cb='pcb'+Math.random().toString(36).slice(2);
     const url=`https://push2delay.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f60,f169&cb=${cb}&_=${Date.now()}`;
     const d=await jsonpGet(url, cb);
     const x=d&&d.data;
     if(!x) return null;
-    // 单位：ETF/基金(15/16/18/51/56/58) 价格用 /1000；A股用 /100
+    // 单位：ETF/基金(15/16/18/51/56/58) 与 港股(116.) 用 /1000；A股用 /100
     const code=secid.split('.')[1];
     const isFund=/^(15|16|18|51|56|58)/.test(code);
-    const unit=isFund?1000:100;
+    const isHK=secid.startsWith('116.');
+    const unit=(isFund||isHK)?1000:100;
     return {price:x.f43/unit, prevClose:x.f60/unit, pct:x.f169/100, name:x.f58};
   }catch(e){ return null; }
 }
@@ -463,7 +459,11 @@ function renderL1(code){
 
   if(!p){
     const fn=STATE.fund&&STATE.fund.name?('（'+STATE.fund.name+'）'):'';
-    body.innerHTML=mb+`<p class="src">未内置该 ETF 基本面画像${fn}，请按下方框架自行研判并勾选（每项下附「如何判断理由」）：</p>
+    const isStock = STATE.asset==='A股个股' || STATE.asset==='港股个股';
+    const tip = isStock
+      ? `未内置该个股基本面画像${fn}。个股需结合公司财报/行业地位/催化剂自行研判，请按下方框架勾选（每项下附「如何判断理由」）：`
+      : `未内置该基金基本面画像${fn}，请按下方框架自行研判并勾选（每项下附「如何判断理由」）：`;
+    body.innerHTML=mb+`<p class="src">${tip}</p>
       <div class="chk"><input type="checkbox" data-l1="0"><span class="lab">① 产业逻辑边际改善<span class="note">订单/capex/政策，而非短期消息</span></span></div>
       <div class="src" style="margin:2px 0 8px 23px;line-height:1.6">你需研判：看近1-2季产业订单/资本开支/政策是否边际向上；有实质订单落地→勾，纯概念→不勾。</div>
       <div class="chk"><input type="checkbox" data-l1="1"><span class="lab">② 无重大行业利空<span class="note">出口限制/需求断崖</span></span></div>
@@ -491,7 +491,7 @@ function renderL1(code){
 }
 
 /* ============ 主流程 ============ */
-let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, market:null, l1checks:[false,false,false], hasK:false, _struc:null};
+let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, market:null, l1checks:[false,false,false], hasK:false, _struc:null, asset:'', srcInfo:''};
 
 function parseShares(text){
   const out=[];
@@ -506,18 +506,33 @@ async function analyze(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='分析中…';
   try{
   const code=document.getElementById('codeInput').value.trim();
-  const secid=toSecid(code);
-  document.getElementById('meta').innerHTML='加载中：'+code+' (secid '+secid+') …';
-  // 分源容错：任一源失败都不拖垮整体，缺哪层就只标哪层
-  let klines=null, fund=null, price=null, kErr=null;
-  try{ klines=await fetchKline(secid,200); }catch(e){
-    // 瞬时失败（跨域/网络抖动）重试一次，自愈后无需进降级分支
-    try{ klines=await fetchKline(secid,200); }catch(e2){ kErr=e2; }
+  const ni=normalizeInput(code);
+  if(!ni){ document.getElementById('meta').innerHTML='⚠ 代码格式不支持（支持：6位 A股/ETF 代码、5位港股代码或 hk 前缀）'; btn.disabled=false; btn.textContent='运行分析'; return; }
+  document.getElementById('meta').innerHTML='加载中：'+code+' …';
+  // 资产类型：先探测是否为基金(pingzhongdata)，再决定序列源
+  let klines=null, fund=null, price=null, kErr=null, srcInfo='';
+  fund=await loadPzd(ni.code);                  // 场内/场外基金均可加载；个股返回 null
+  const isFund=!!fund;
+  const isETF=isFund && /^(15|16|18|50|51|55|56|58|59)/.test(ni.code);
+  const isOCF=isFund && !isETF;                 // 场外基金（无场内交易→无折溢价/份额申赎套利）
+  const isStock=!isFund;                         // A股或港股个股
+  STATE.asset = isOCF ? '场外基金' : (isETF ? '场内ETF' : (ni.isHK ? '港股个股' : 'A股个股'));
+  // 价格源：场外基金用最新净值；个股/ETF 用实时价(push2delay，港股走 116.)
+  let priceSecid = isOCF ? null : (ni.isHK ? '116.'+ni.code : toSecid(ni.code));
+  try{ price=await fetchPrice(priceSecid); }catch(e){}
+  if(isOCF && fund){ const nw=fund.netWorthTrend; if(nw&&nw.length) price={price:nw[nw.length-1].y, prevClose:(nw.length>1?nw[nw.length-2].y:0), pct:0, name:fund.name}; }
+  // K线/价格序列源
+  if(isOCF){
+    klines=navSeries(fund); srcInfo='净值历史(pingzhongdata，独立于腾讯源)';
+  }else{
+    try{ klines=await fetchKline(ni.code, ni.market); srcInfo='腾讯gtimg K线'; }
+    catch(e){
+      kErr=e;
+      if(isETF && fund){ klines=navSeries(fund); srcInfo='净值历史兜底(pingzhongdata，ETF净值≈价格)'; } // ETF 净值≈价，可兜底
+    }
   }
-  try{ fund=await loadPzd(code); }catch(e){}
-  try{ price=await fetchPrice(secid); }catch(e){}
   try{ STATE.market=await fetchMarketBreadth(); }catch(e){ STATE.market=null; }
-  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.hasK=!!klines;
+  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.hasK=!!klines; STATE.srcInfo=srcInfo;
   STATE.l1checks=renderL1(code);
   document.getElementById('rag').innerHTML='';
   document.getElementById('verdict').innerHTML='分析完成';
@@ -525,7 +540,7 @@ async function analyze(){
   // L3 / L2 依赖 K线：缺失则明确降级，不崩
   if(!klines){
     document.getElementById('l3chart').innerHTML=
-      `<div class="err">⚠ K线加载失败：${kErr?kErr.message:'未知错误'}。<br>多为东财 K线接口临时跨域/网络拦截。可点「运行分析」重试；若持续失败，多为当前网络环境对该接口的限制。</div>`;
+      `<div class="err">⚠ K线加载失败：${kErr?kErr.message:'未知错误'}。<br>趋势源为腾讯 gtimg K线，多为网络环境对该接口的拦截。可点「运行分析」重试；若持续失败，ETF 可改看净值历史兜底、个股暂无替代源（场外基金走净值历史不受影响）。</div>`;
     document.getElementById('l3legend').innerHTML='';
     document.getElementById('macdchart').innerHTML='';
     document.getElementById('kdjchart').innerHTML='';
@@ -535,7 +550,7 @@ async function analyze(){
     computeRAG(null,null,null,null,null,null);
     STATE._struc=null;
     const nm=(price&&price.name)||(fund&&fund.name)||code;
-    document.getElementById('meta').innerHTML=`标的：<b>${nm}</b> · K线数据缺失，仅展示可用层（L1 基本面 / L4 资金）。`;
+    document.getElementById('meta').innerHTML=`标的：<b>${nm}</b> · 类型【${STATE.asset}】· K线数据缺失，仅展示可用层（L1 基本面 / L4 资金）。`;
     renderChecklist();
     fetchSectorResearch();
     btn.disabled=false; btn.textContent='运行分析'; return;
@@ -576,7 +591,7 @@ async function analyze(){
   // ---- meta ----
   const nm=(price&&price.name)||(fund&&fund.name)||code;
   document.getElementById('meta').innerHTML=
-    `标的：<b>${nm}</b> · 代码 ${code} · 数据区间 ${klines[0].date} ~ ${klines[klines.length-1].date}（${klines.length}交易日）· 现价 <b>${price?price.price.toFixed(3):cur.toFixed(3)}</b>`;
+    `标的：<b>${nm}</b> · 类型【${STATE.asset}】· 代码 ${code} · 数据区间 ${klines[0].date} ~ ${klines[klines.length-1].date}（${klines.length}交易日）· 现价 <b>${price?price.price.toFixed(3):cur.toFixed(3)}</b> · 序列源：${srcInfo}`;
 
   renderChecklist();
   fetchSectorResearch();
@@ -693,10 +708,44 @@ function renderL4(klines, fund, price){
   if(fund && fund.grandTotal){ const g=parseGrandTotal(fund.grandTotal); if(g){ daily=g.daily; net5=g.net5; } }
   if(fund && fund.buySed){ total=totalShares(fund.buySed); }
   STATE.netFlow=daily; STATE.totalShares=total; STATE._net5=net5;
-  // 默认把自动数据填入文本框（用户编辑后点「应用」可覆盖；靠 dataset.touched 防回跑覆盖）
+
+  // —— 个股（A股/港股）：L4 资金层不适用，隐藏 ——
+  if(STATE.asset==='A股个股' || STATE.asset==='港股个股'){
+    body.innerHTML=`<p class="src">个股（${STATE.asset}）不涉及 ETF 一级市场（场内份额 / 折溢价 / 净申赎），L4 资金层不适用。<br>趋势与赔率以 L3 价格结构 / L2 分位为准；个股资金面可另看主力资金流 / 北向持仓（本工具暂未接入）。</p>`;
+    document.getElementById('l4premium').innerHTML='';
+    document.getElementById('l4src').innerHTML='';
+    STATE._prem=null; STATE._net5=null;
+    return;
+  }
+
+  // —— 场外基金：无场内折溢价，显示净值/份额/净申赎/股票仓位 ——
+  if(STATE.asset==='场外基金'){
+    let posHtml='';
+    if(fund && fund.positions && fund.positions.length){
+      let sum=0; fund.positions.forEach(p=>{ const r=parseFloat(p[2]); if(!isNaN(r)) sum+=r; });
+      const top=fund.positions[0];
+      posHtml=`<div class="kv"><span class="k">股票占净比</span><span class="v">${sum.toFixed(1)}%（前十大参考）</span></div>
+        <div class="kv"><span class="k">第一重仓</span><span class="v" style="font-weight:400;font-size:12px">${top?top[1]:'—'}</span></div>`;
+    }
+    const navY=(fund&&fund.netWorthTrend&&fund.netWorthTrend.length)? +fund.netWorthTrend[fund.netWorthTrend.length-1].y : null;
+    let html=`<div class="kv"><span class="k">单位净值(最新)</span><span class="v">${navY!=null?navY.toFixed(4):'—'}</span></div>`;
+    if(total!=null) html+=`<div class="kv"><span class="k">总份额</span><span class="v">${total.toFixed(2)} 亿份</span></div>`;
+    if(net5!=null){
+      const col=net5>0?'var(--green)':'var(--amber)';
+      html+=`<div class="kv"><span class="k">近5日净申赎</span><span class="v" style="color:${col}">${(net5>=0?'+':'')+net5.toFixed(2)} 亿份</span></div>`;
+    }
+    html+=posHtml;
+    html+=`<div id="netflowchart" style="margin-top:8px">${renderNetFlow(daily)}</div>`;
+    body.innerHTML=html;
+    document.getElementById('l4premium').innerHTML=`<div style="font-size:12px;color:var(--txt2);margin-bottom:4px">场内折溢价</div><p class="src">场外基金按净值申赎、无场内交易价格，故无折溢价（无需监测套利陷阱）。</p>`;
+    STATE._prem=null;
+    document.getElementById('l4src').innerHTML=`<b>数据源（全自动）</b>：净值 / 总份额 / 净申赎均来自 pingzhongdata（无需手动粘贴）；场外基金以净值历史为价格序列，趋势见 L2/L3。`;
+    return;
+  }
+
+  // —— 场内 ETF/LOF：折溢价 + 份额 + 净申赎（原有逻辑）——
   const ta=document.getElementById('sharesInput');
   if(daily && !ta.dataset.touched) ta.value=netFlowText(daily);
-
   let html='';
   if(total!=null) html+=`<div class="kv"><span class="k">当前总份额</span><span class="v">${total.toFixed(2)} 亿份</span></div>`;
   if(net5!=null){
@@ -882,9 +931,14 @@ const CHECKS=[
     t:'⑤ 一级市场无套利干扰：折溢价|x|≤3% 且 近5日净申赎≥-5亿份',
     n:'对应 L4（折溢价 |x|≤3% 且 近5日净申赎≥-5亿）',
     judge:()=>{
+      const a=STATE.asset;
+      if(a==='A股个股'||a==='港股个股') return 'na';        // 个股无一级市场资金维度
+      if(a==='场外基金'){                                      // 场外基金无折溢价概念，只看净申赎
+        const net=STATE._net5;
+        return (net!=null) ? (net>=-5) : 'manual';
+      }
       if(STATE._prem==null) return 'manual';
       const premOk=Math.abs(STATE._prem)<=3;
-      // 净申赎：正=申购(支持)，负=赎回(警惕)；用 |净申赎| < 5亿 或 净申购 都算过
       const net=STATE._net5;
       const netOk = (net!=null) ? (net>=-5) : true;
       return premOk && netOk;
@@ -949,6 +1003,8 @@ function renderChecklist(){
                   : (i===0) ? '大盘广度数据暂未取到（push2delay 临时拦截）'
                   : '净值/现价数据暂未取到';
       ev.innerHTML=`<span style="color:var(--amber)">⚠ ${reason}。点「运行分析」重试，数据恢复后系统会自动判定 ✓/✗（无需你手动判断）</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 若反复失败，你也可手动校验：${g}</div>`;
+    }else if(CHK_AUTO[i]==='na'){
+      ev.innerHTML=`<span style="color:var(--txt3)">ℹ 不适用（${STATE.asset}无此维度：个股 / 场外基金不涉及场内折溢价与一级市场份额申赎）</span>`;
     }else if(txt){
       if(CHK_AUTO[i]===true){
         ev.innerHTML=`<span style="color:var(--green);font-weight:600">✓ 通过</span> <span class="src">理由：${txt}</span>`;
