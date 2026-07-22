@@ -235,7 +235,7 @@ function loadPzd(code){
     function cleanup(){ clearTimeout(t); if(sc&&sc.parentNode) sc.parentNode.removeChild(sc); }
     sc=document.createElement('script');
     sc.onload=()=>{ setTimeout(()=>{ try{
-        const nw=window.netWorthTrend, name=window.fS_name;
+        const nw=window.Data_netWorthTrend, name=window.fS_name;
         const gt=window.Data_grandTotal, bs=window.Data_buySedemption;
         cleanup(); resolve({name:name||'', netWorthTrend:nw||[], grandTotal:gt||null, buySed:bs||null});
       }catch(e){ cleanup(); resolve(null); } }, 600); };
@@ -489,6 +489,7 @@ async function analyze(){
     const nm=(price&&price.name)||(fund&&fund.name)||code;
     document.getElementById('meta').innerHTML=`标的：<b>${nm}</b> · K线数据缺失，仅展示可用层（L1 基本面 / L4 资金）。`;
     renderChecklist();
+    fetchSectorResearch();
     btn.disabled=false; btn.textContent='运行分析'; return;
   }
 
@@ -530,6 +531,7 @@ async function analyze(){
     `标的：<b>${nm}</b> · 代码 ${code} · 数据区间 ${klines[0].date} ~ ${klines[klines.length-1].date}（${klines.length}交易日）· 现价 <b>${price?price.price.toFixed(3):cur.toFixed(3)}</b>`;
 
   renderChecklist();
+  fetchSectorResearch();
   btn.disabled=false; btn.textContent='运行分析';
 }
 
@@ -571,6 +573,48 @@ function totalShares(bs){
   const row=bs.find(x=>x.name==='总份额');
   if(!row || !row.data || !row.data.length) return null;
   return +row.data[row.data.length-1];
+}
+function avg(a){ if(!a||!a.length) return 0; return a.reduce((x,y)=>x+y,0)/a.length; }
+// 价格结构"持续性"信号：用已有 K线判断这是一段可持续的抬升(偏基本面驱动)，
+// 还是单日/数日脉冲(偏消息刺激)。这是可量化的代理，不能替代新闻/订单核实。
+function sustainSignal(klines){
+  const n=klines.length;
+  if(n<20) return {days:0, hh:0, volUp:false, sustained:false};
+  const closes=klines.map(k=>k.close), vols=klines.map(k=>k.vol);
+  let lowIdx=n-1;
+  for(let i=n-1;i>=0;i--){ if(closes[i] < closes[n-1]*0.92){ lowIdx=i+1; break; } }
+  const days=n-1-lowIdx;
+  const seg=klines.slice(lowIdx);
+  const pv=pivots(seg,5);
+  const hh=pv.H.length;
+  const half=Math.max(1,Math.floor(days/2));
+  const recentVol=avg(vols.slice(n-half)), prevVol=avg(vols.slice(lowIdx, n-half));
+  const volUp= prevVol>0 && recentVol>prevVol*1.05;
+  const sustained = days>=10 && hh>=2 && volUp;
+  return {days, hh, volUp, sustained};
+}
+function fundTheme(name){
+  if(!name) return '';
+  let s=String(name).split('ETF')[0];
+  ['国泰','华夏','易方达','南方','博时','广发','嘉实','天弘','汇添富','银华','招商','华安','富国','鹏华','工银瑞信','建信','中欧','景顺','兴全','交银','东方红','平安','大成','诺安','前海开源','华宝','国联安','申万','兴业','国寿','泰康','永赢','民生','光大','海富通','万家','国投','安信','中银','农银','长城','华泰','浙商','财通','东财','同泰'].forEach(m=>{ s=s.replace(m,''); });
+  return s.trim();
+}
+function ymd(d){ const p=n=>(''+n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+// 尽力而为：拉赛道研报数量做情绪参考（CORS 失败则静默跳过，不影响结构判断）
+async function fetchSectorResearch(){
+  const theme=fundTheme(STATE.fund&&STATE.fund.name)||'';
+  if(!theme) return;
+  try{
+    const end=ymd(new Date()), start=ymd(new Date(Date.now()-90*864e5));
+    const kw=encodeURIComponent(theme);
+    const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=30&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}`;
+    const r=await fetch(url); if(!r.ok) return;
+    const d=await r.json();
+    const cnt=(d&&d.data)?d.data.length:0;
+    STATE.research={ok:true, count:cnt};
+  }catch(e){ STATE.research={ok:false}; }
+  const ev=document.getElementById('chkevi1');
+  if(ev && CHECKS[1] && CHECKS[1].evi){ try{ ev.innerHTML=`<span class="src">${CHECKS[1].evi()}</span>`; }catch(e){} }
 }
 function netFlowText(daily){
   if(!daily||!daily.length) return '';
@@ -639,6 +683,14 @@ function setRAG(idx, name, role, color, verdict){
   div.innerHTML=`<div class="name">${name}</div>${ragDot(color)}<div class="verdict" style="color:${color==='green'?'var(--green)':color==='red'?'var(--red)':'var(--amber)'}">${verdict}</div><div class="role" style="font-size:10px;color:var(--txt3);margin-top:4px">${role}</div>`;
   el.appendChild(div);
 }
+function l4Verdict(L4){
+  if(L4==='green') return '确认流入·验证偏多';
+  if(L4==='red') return '高溢价·套利风险';
+  // amber：区分"真有数据但净赎回"与"压根没数据"
+  if(STATE.netFlow && STATE.netFlow.length>=2)
+    return STATE._net5>0 ? '净申购·偏多' : '净赎回·中性偏弱';
+  return '待数据(份额序列缺失)';
+}
 function computeRAG(pct, struc, macd, closes, ma20, ma60){
   const el=document.getElementById('rag'); el.innerHTML='';
   // 无 K线：趋势层不可用，只给 L1/L4 与明确提示，不崩
@@ -651,7 +703,7 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
     setRAG(0,'L1 基本面','方向锚',L1, L1==='green'?'偏多':L1==='amber'?'中性':'偏弱');
     setRAG(1,'L2 赔率','安全边际','gray','数据缺失');
     setRAG(2,'L3 价格趋势','趋势本体','gray','数据缺失');
-    setRAG(3,'L4 资金','验证器',L4, L4==='green'?'确认流入':L4==='amber'?'待数据':L4==='red'?'高溢价':'流出');
+    setRAG(3,'L4 资金','验证器',L4, l4Verdict(L4));
     const vb=document.getElementById('verdict');
     vb.innerHTML=`综合结论：<span style="color:var(--amber)">趋势层(K线)数据缺失，无法给出交易结论</span><div class="sub">仅 L1 基本面与 L4 资金可用。请重试 K 线加载（多为东财接口临时拦截），恢复后重跑即可。</div>`;
     return;
@@ -681,7 +733,7 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
   setRAG(0,'L1 基本面','方向锚',L1, L1==='green'?'偏多':L1==='amber'?'中性':'偏弱');
   setRAG(1,'L2 赔率','安全边际',L2, L2==='green'?'低位好':L2==='amber'?'中位':'高位慎');
   setRAG(2,'L3 价格趋势','趋势本体',L3, L3==='green'?'上升':L3==='amber'?'震荡':'下降');
-  setRAG(3,'L4 资金','验证器',L4, L4==='green'?'确认流入':L4==='amber'?'待数据':L4==='red'&&Math.abs(prem)>3?'高溢价':'流出');
+  setRAG(3,'L4 资金','验证器',L4, l4Verdict(L4));
 
   const greens=[L1,L2,L3,L4].filter(c=>c==='green').length;
   const reds=[L1,L2,L3,L4].filter(c=>c==='red').length;
@@ -715,9 +767,20 @@ const CHECKS=[
   },
   {
     t:'赛道基本面有没有边际改善？还是仅短期消息刺激？',
-    n:'产业 capex/订单/政策（系统无法判定，需你看新闻/调研/纪要）',
-    judge:()=>'manual',
-    evi:()=>'本项无可靠自动数据源，请基于近期产业新闻/订单/政策自行勾选'
+    n:'数据驱动：价格结构持续性(持续天数/创新高/量能) + 研报数量(尽力)',
+    judge:()=>{
+      if(!STATE.klines) return 'manual';
+      return sustainSignal(STATE.klines).sustained;
+    },
+    evi:()=>{
+      if(!STATE.klines) return null;
+      const s=sustainSignal(STATE.klines);
+      const verdict = s.sustained ? '偏基本面驱动(数据提示)' : '偏消息/短线刺激(数据提示)';
+      let txt=`持续 ${s.days}交易日 · 创新高 ${s.hh}次 · 量能${s.volUp?'放大✅':'未放大⚠'} → ${verdict}`;
+      if(STATE.research && STATE.research.ok) txt += ` · 近90天研报 ${STATE.research.count}篇`;
+      txt += '（仍建议用新闻/订单最终确认）';
+      return txt;
+    }
   },
   {
     t:'指数估值处于高位还是低位？赔率如何？',
