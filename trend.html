@@ -199,7 +199,7 @@ async function fetchKline(secid, limit){
   try{
     const url=`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mkt}${code},day,,,${limit},qfq`;
     const ctrl=new AbortController();
-    const to=setTimeout(()=>ctrl.abort(),12000);
+    const to=setTimeout(()=>ctrl.abort(),9000);
     const r=await fetch(url,{signal:ctrl.signal});
     clearTimeout(to);
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -510,7 +510,10 @@ async function analyze(){
   document.getElementById('meta').innerHTML='加载中：'+code+' (secid '+secid+') …';
   // 分源容错：任一源失败都不拖垮整体，缺哪层就只标哪层
   let klines=null, fund=null, price=null, kErr=null;
-  try{ klines=await fetchKline(secid,200); }catch(e){ kErr=e; }
+  try{ klines=await fetchKline(secid,200); }catch(e){
+    // 瞬时失败（跨域/网络抖动）重试一次，自愈后无需进降级分支
+    try{ klines=await fetchKline(secid,200); }catch(e2){ kErr=e2; }
+  }
   try{ fund=await loadPzd(code); }catch(e){}
   try{ price=await fetchPrice(secid); }catch(e){}
   try{ STATE.market=await fetchMarketBreadth(); }catch(e){ STATE.market=null; }
@@ -826,8 +829,8 @@ const CHECKS=[
       const s=sustainSignal(STATE.klines);
       const verdict = s.sustained ? '偏基本面驱动(数据提示)' : '偏消息/短线刺激(数据提示)';
       let txt=`持续 ${s.days}交易日 · 创新高 ${s.hh}次 · 量能${s.volUp?'放大✅':'未放大⚠'} → ${verdict}`;
-      if(STATE.research && STATE.research.ok) txt += ` · 近90天研报 ${STATE.research.count}篇`;
-      txt += '（仍建议用新闻/订单最终确认）';
+      if(STATE.research && STATE.research.ok) txt += ` · 研报佐证 ${STATE.research.count}篇（机构关注度，仅作 corroboration）`;
+      txt += '（结构判断已自动完成；研报为补充佐证，非判定门槛。最终确认建议结合产业新闻/订单）';
       return txt;
     }
   },
@@ -941,7 +944,11 @@ function renderChecklist(){
     try{ txt=c.evi(); }catch(e){}
     if(CHK_AUTO[i]==='manual'){
       const g=GUIDES[i];
-      ev.innerHTML=`<span style="color:var(--amber)">⚠ 数据缺失·需你校验</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 如何校验：${g}</div>`;
+      // 诚实区分：这是「数据暂未取到（自动判断不可用）」，不是「要你手动判断」。系统一旦取到数据即自动判定 ✓/✗。
+      const reason = (i>=1&&i<=3) ? 'K线数据暂未取到（多为网络/跨域临时波动）— 结构判断自动不可用'
+                  : (i===0) ? '大盘广度数据暂未取到（push2delay 临时拦截）'
+                  : '净值/现价数据暂未取到';
+      ev.innerHTML=`<span style="color:var(--amber)">⚠ ${reason}。点「运行分析」重试，数据恢复后系统会自动判定 ✓/✗（无需你手动判断）</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 若反复失败，你也可手动校验：${g}</div>`;
     }else if(txt){
       if(CHK_AUTO[i]===true){
         ev.innerHTML=`<span style="color:var(--green);font-weight:600">✓ 通过</span> <span class="src">理由：${txt}</span>`;
