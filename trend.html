@@ -153,7 +153,7 @@
   <!-- 5步复盘清单 -->
   <div class="card">
     <h2>极简实战复盘清单 <span class="tag">按顺序检查，缺 2 条以上 → 观望/小仓</span></h2>
-    <p class="src" style="margin:0 0 8px">规则：<b style="color:var(--green)">勾选 = 该项通过（绿灯，可动手）</b>；<b style="color:var(--red)">未勾 = 不通过（红灯，回避）</b>。系统已按实时数据自动判定，你可手动修改任意项。</p>
+    <p class="src" style="margin:0 0 8px">判定规则：<b>每条标题即「勾选标准」</b>——满足该条件就勾✅，不满足就不勾❌。系统按实时数据自动判定，勾/不勾下方都给出理由，你也可手动改任意项。勾选数 ≥4 → 高价值机会；=3 → 观望/小仓；≤2 → 坚决观望。</p>
     <div id="checklist"></div>
     <div class="verdict-box" id="checkVerdict" style="margin-top:12px">勾选后自动给结论</div>
   </div>
@@ -424,27 +424,68 @@ const L1_PROFILE={
       '订单：头部设备厂订单能见度达80周以上，订单/收入比高位',
       '风险：海外出口限制变化、晶圆厂capex节奏波动、估值高位回撤风险',
     ],
-    checks:[true,true,true] // 产业逻辑改善 / 无重大利空 / 中期方向向上
+    checks:[true,true,true], // 产业逻辑改善 / 无重大利空 / 中期方向向上
+    reasons:[
+      '国内晶圆厂 capex 处于超级周期，设备国产化率由约21%向43%目标推进；头部设备厂订单能见度≥80周、订单/收入比高位 → 产业逻辑持续边际改善，非单纯消息刺激。',
+      '当前出口限制已较充分 price-in，未见新增断崖式利空；需求由国产替代刚性驱动 → 无重大行业利空（若出口限制再升级需重估）。',
+      '国产替代是政策+产业双驱动的长坡厚雪，半导体设备处渗透率早期 → 中期方向向上，判断为反转而非反弹（仍需 L3 价格结构右侧确认）。'
+    ]
   }
 };
 function renderL1(code){
   const p=L1_PROFILE[code];
   const body=document.getElementById('l1body');
+
+  // —— 大盘赚钱效应（数据驱动，自动；与复盘清单①共用同一份 STATE.market，只拉一次）——
+  const m=STATE.market;
+  let mb='';
+  if(m){
+    const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
+    const col=ok?'var(--green)':'var(--red)';
+    const verdict=ok?'✓ 环境友好（通过·可勾）':'✗ 环境偏弱（不通过·不勾）';
+    const why=ok
+      ? '中位数转正、涨多跌少、成交活跃 → 系统性环境利于个股表现，可放宽选股条件。'
+      : '中位数偏弱 / 涨少跌多 / 成交低迷 → 系统性风险偏大，宜控仓、只做最强结构。';
+    mb=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
+      <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">大盘赚钱效应（自动 · 全市场${m.total}只 · <span class="src">${m.source}</span>）</div>
+      <div class="kv"><span class="k">涨跌中位数</span><span class="v" style="color:${m.median>=0?'var(--up)':'var(--down)'}">${m.median>=0?'+':''}${m.median.toFixed(2)}%</span></div>
+      <div class="kv"><span class="k">上涨家数占比</span><span class="v">${m.upPct.toFixed(1)}%（${m.up}涨 / ${m.dn}跌）</span></div>
+      <div class="kv"><span class="k">两市成交额</span><span class="v">${(m.totAmt/1e8).toFixed(0)}亿</span></div>
+      <div class="kv"><span class="k">判定</span><span class="v" style="color:${col}">${verdict}</span></div>
+      <div class="src" style="margin-top:5px;line-height:1.6">理由：${why}</div>
+    </div>`;
+  }else{
+    mb=`<div style="border:1px solid var(--amber);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
+      <div style="color:var(--amber);font-size:12px">⚠ 大盘广度数据获取失败</div>
+      <div class="src" style="margin-top:4px;line-height:1.6">📌 如何校验：东方财富/同花顺看「上涨家数占比≥45%」+「个股涨跌中位数≥+0.1%」+「全市场成交额≥6000亿」→ 满足则大盘环境友好，可勾。</div>
+    </div>`;
+  }
+
   if(!p){
     const fn=STATE.fund&&STATE.fund.name?('（'+STATE.fund.name+'）'):'';
-    body.innerHTML=`<p class="src">未内置该 ETF 基本面画像${fn}，请按框架自行研判：</p>
-      <div class="chk"><input type="checkbox" data-l1="0"><span class="lab">产业逻辑边际改善（订单/capex/政策）<span class="note">而非单纯短期消息刺激</span></span></div>
-      <div class="chk"><input type="checkbox" data-l1="1"><span class="lab">无重大行业利空<span class="note">出口限制、需求断崖等</span></span></div>
-      <div class="chk"><input type="checkbox" data-l1="2"><span class="lab">中长期方向向上<span class="note">区分反弹与反转</span></span></div>`;
+    body.innerHTML=mb+`<p class="src">未内置该 ETF 基本面画像${fn}，请按下方框架自行研判并勾选（每项下附「如何判断理由」）：</p>
+      <div class="chk"><input type="checkbox" data-l1="0"><span class="lab">① 产业逻辑边际改善<span class="note">订单/capex/政策，而非短期消息</span></span></div>
+      <div class="src" style="margin:2px 0 8px 23px;line-height:1.6">你需研判：看近1-2季产业订单/资本开支/政策是否边际向上；有实质订单落地→勾，纯概念→不勾。</div>
+      <div class="chk"><input type="checkbox" data-l1="1"><span class="lab">② 无重大行业利空<span class="note">出口限制/需求断崖</span></span></div>
+      <div class="src" style="margin:2px 0 8px 23px;line-height:1.6">你需研判：有无新增监管/贸易/需求断崖风险；无明显利空→勾，有则暂不勾。</div>
+      <div class="chk"><input type="checkbox" data-l1="2"><span class="lab">③ 中长期方向向上<span class="note">区分反弹与反转</span></span></div>
+      <div class="src" style="margin:2px 0 4px 23px;line-height:1.6">你需研判：产业趋势是否长周期向上；长坡厚雪→勾，周期顶/衰退→不勾。勾选后仍需 L3 价格结构右侧确认。</div>`;
     return [false,false,false];
   }
-  let html=`<div class="kv"><span class="k">跟踪指数</span><span class="v">${p.index}</span></div>
+
+  let html=mb;
+  html+=`<div class="kv"><span class="k">跟踪指数</span><span class="v">${p.index}</span></div>
     <div class="kv"><span class="k">主题</span><span class="v" style="font-weight:400;font-size:12px;max-width:60%;text-align:right">${p.theme}</span></div>`;
   p.facts.forEach(f=>html+=`<div class="kv"><span class="k">•</span><span class="v" style="font-weight:400;font-size:12px">${f}</span></div>`);
-  html+=`<div style="margin-top:8px;font-size:12px;color:var(--txt2)">方向研判（可修改）：</div>
-    <div class="chk"><input type="checkbox" data-l1="0" ${p.checks[0]?'checked':''}><span class="lab">产业逻辑边际改善</span></div>
-    <div class="chk"><input type="checkbox" data-l1="1" ${p.checks[1]?'checked':''}><span class="lab">无重大行业利空</span></div>
-    <div class="chk"><input type="checkbox" data-l1="2" ${p.checks[2]?'checked':''}><span class="lab">中长期方向向上</span></div>`;
+  html+=`<div style="margin-top:8px;font-size:12px;color:var(--txt2)">方向研判（可修改）：</div>`;
+  const labels=['① 产业逻辑边际改善','② 无重大行业利空','③ 中长期方向向上'];
+  const notes=['订单/capex/政策驱动，非单纯消息','出口限制/需求断崖等','区分反弹与反转'];
+  labels.forEach((lab,i)=>{
+    const checked=p.checks[i];
+    const col=checked?'var(--green)':'var(--txt3)';
+    html+=`<div class="chk"><input type="checkbox" data-l1="${i}" ${checked?'checked':''}><span class="lab">${lab}<span class="note">${notes[i]}</span></span></div>
+      <div class="src" style="margin:2px 0 8px 23px;line-height:1.6;color:${col}">${checked?'✓ 勾选理由：':'⚪ 未勾理由：'}${p.reasons[i]}</div>`;
+  });
   body.innerHTML=html;
   return p.checks.slice();
 }
@@ -758,7 +799,7 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
    系统已按实时数据自动判定每项勾选/不勾；仅当数据真取不到时才给出手动校验指引。 */
 const CHECKS=[
   {
-    t:'① 大盘环境友好吗？(赚钱效应) — 勾=上涨占比≥45%且成交活跃；不勾=系统性风险大',
+    t:'① 大盘赚钱效应达标：上涨家数占比≥45% 且 涨跌中位数≥+0.1% 且 成交额≥6000亿',
     n:'自动取：全市场涨跌中位数 + 上涨家数占比 + 总成交额(push2delay)',
     // 返回 true(勾) / false(不勾) / 'manual'(需手动)
     judge:()=>{
@@ -774,7 +815,7 @@ const CHECKS=[
     }
   },
   {
-    t:'② 赛道基本面在改善吗？(非纯消息刺激) — 勾=结构持续抬升+研报密集；不勾=仅短线脉冲',
+    t:'② 赛道基本面边际改善：价格结构持续抬升（持续≥10日+创新高≥2次+放量）且研报密集，非纯消息脉冲',
     n:'数据驱动：价格结构持续性(持续天数/创新高/量能) + 研报数量(尽力)',
     judge:()=>{
       if(!STATE.klines) return 'manual';
@@ -791,7 +832,7 @@ const CHECKS=[
     }
   },
   {
-    t:'③ 估值贵不贵？(赔率) — 勾=价格/估值分位<75%；不勾=高位警惕',
+    t:'③ 估值不贵：价格分位<75%（对应 PE/PB 5年分位<75%）',
     n:'对应 L2 价格分位（>75% 偏贵 · <35% 偏便宜）',
     judge:()=>{
       if(!STATE.klines) return 'manual';
@@ -814,7 +855,7 @@ const CHECKS=[
     }
   },
   {
-    t:'④ 价格走出下跌趋势了吗？ — 勾=高低点抬高+均线多头；不勾=仍在下降',
+    t:'④ 价格已走出下跌趋势：高低点抬高（HH-HL）且 均线多头排列（收盘价>MA20>MA60）',
     n:'对应 L3 结构/HH-HL（含均线多头排列）',
     judge:()=>{
       if(!STATE.klines||!STATE._struc) return 'manual';
@@ -835,7 +876,7 @@ const CHECKS=[
     }
   },
   {
-    t:'⑤ 一级市场有套利干扰吗？ — 勾=折溢价≤3%且非大幅净赎回；不勾=高溢价/净赎回警惕',
+    t:'⑤ 一级市场无套利干扰：折溢价|x|≤3% 且 近5日净申赎≥-5亿份',
     n:'对应 L4（折溢价 |x|≤3% 且 近5日净申赎≥-5亿）',
     judge:()=>{
       if(STATE._prem==null) return 'manual';
@@ -873,16 +914,20 @@ function renderChecklist(){
   const CHK_AUTO=[];
   const el=document.getElementById('checklist'); el.innerHTML='';
   CHECKS.forEach((c,i)=>{
-    const div=document.createElement('div'); div.className='chk';
     let autoVal=null; try{ autoVal=c.judge(); }catch(e){}
     CHK_AUTO[i]=autoVal;
     const manual=autoVal==='manual';
     const autoChecked=autoVal===true;
+    const div=document.createElement('div'); div.className='chk';
     div.innerHTML=`<input type="checkbox" data-chk="${i}" ${autoChecked?'checked':''} ${manual?'data-manual="1"':''}>
-      <span class="lab">${i+1}. ${c.t}<span class="note">${c.n}</span></span>
-      <span class="autoevi" id="chkevi${i}"></span>`;
+      <span class="lab">${c.t}<span class="note">${c.n}</span></span>`;
     if(manual) div.setAttribute('data-manual','1');
     el.appendChild(div);
+    // 理由单独成行（勾/不勾都给出依据，便于学习判断思路）
+    const re=document.createElement('div');
+    re.id='chkevi'+i;
+    re.style.cssText='margin:-4px 0 10px 23px;font-size:11.5px;line-height:1.6';
+    el.appendChild(re);
   });
   el.querySelectorAll('input[data-chk]').forEach(inp=>{
     inp.dataset.manual = inp.dataset.manual || '0';
@@ -894,14 +939,15 @@ function renderChecklist(){
     if(!ev) return;
     let txt=null;
     try{ txt=c.evi(); }catch(e){}
-    const isManual = c.judge && c.judge()==='manual';
-    if(isManual){
+    if(CHK_AUTO[i]==='manual'){
       const g=GUIDES[i];
-      ev.innerHTML=`<span class="src" style="color:var(--amber)">⚠ 数据缺失·需你校验</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 如何校验：${g}</div>`;
+      ev.innerHTML=`<span style="color:var(--amber)">⚠ 数据缺失·需你校验</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 如何校验：${g}</div>`;
     }else if(txt){
-      const autoChecked=CHK_AUTO[i]===true;
-      const tag=autoChecked?'<span style="color:var(--green)">✓系统已自动勾选</span> ':'<span style="color:var(--txt3)">✗系统未通过</span> ';
-      ev.innerHTML=`${tag}<span class="src">${txt}</span>`;
+      if(CHK_AUTO[i]===true){
+        ev.innerHTML=`<span style="color:var(--green);font-weight:600">✓ 通过</span> <span class="src">理由：${txt}</span>`;
+      }else{
+        ev.innerHTML=`<span style="color:var(--red);font-weight:600">✗ 未通过</span> <span class="src">理由：${txt}（不满足勾选条件）</span>`;
+      }
     }else{
       ev.innerHTML=`<span class="src">无依据</span>`;
     }
