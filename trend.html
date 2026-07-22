@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>四层趋势框架 · ETF 趋势判断工具</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --border:#2a313c;
+    --txt:#e6edf3; --txt2:#9aa7b4; --txt3:#6b7785;
+    --up:#ef4444;      /* 涨=红 (A股习惯) */
+    --down:#22c55e;    /* 跌=绿 */
+    --amber:#f5a623;
+    --blue:#4ea1ff; --purple:#a78bfa;
+    --green:#22c55e; --red:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;line-height:1.5}
+  header{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--panel);position:sticky;top:0;z-index:10}
+  header h1{margin:0 0 8px;font-size:16px;font-weight:600}
+  .ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .ctrl input{background:var(--panel2);border:1px solid var(--border);color:var(--txt);padding:7px 10px;border-radius:6px;font-size:13px;width:150px}
+  .ctrl button{background:var(--blue);border:0;color:#fff;padding:7px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600}
+  .ctrl button:disabled{opacity:.5;cursor:default}
+  .ctrl .hint{color:var(--txt3);font-size:12px}
+  .meta{color:var(--txt2);font-size:12px;margin-top:6px}
+  .meta b{color:var(--txt)}
+  main{padding:16px 18px;max-width:1180px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card h2{margin:0 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .card h2 .tag{font-size:11px;font-weight:500;color:var(--txt3);background:var(--panel2);padding:2px 7px;border-radius:20px}
+  .card h2 .role{font-size:11px;font-weight:500;color:var(--txt3)}
+  /* RAG bar */
+  .rag{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:6px}
+  .rag .lyr{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center}
+  .rag .lyr .name{font-size:12px;color:var(--txt2);margin-bottom:6px}
+  .rag .lyr .dot{width:14px;height:14px;border-radius:50%;display:inline-block;margin-bottom:6px}
+  .rag .lyr .verdict{font-size:12px;font-weight:600}
+  .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.red{background:var(--red)}
+  .verdict-box{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:14px;font-weight:600}
+  .verdict-box .sub{font-size:12px;font-weight:400;color:var(--txt2);margin-top:6px;line-height:1.6}
+  .kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--border);font-size:12px}
+  .kv:last-child{border-bottom:0}
+  .kv .k{color:var(--txt2)} .kv .v{font-weight:600}
+  .gauge{height:14px;background:var(--panel2);border-radius:7px;overflow:hidden;position:relative;margin:10px 0 4px;border:1px solid var(--border)}
+  .gauge .fill{height:100%;border-radius:7px;transition:width .3s}
+  .gauge .mark{position:absolute;top:-3px;width:2px;height:20px;background:var(--txt3)}
+  .scale-row{display:flex;justify-content:space-between;color:var(--txt3);font-size:11px}
+  /* checklist */
+  .chk{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
+  .chk:last-child{border-bottom:0}
+  .chk input{margin-top:3px;width:15px;height:15px;accent-color:var(--blue)}
+  .chk .lab{color:var(--txt)}
+  .chk .note{color:var(--txt3);font-size:11px;display:block;margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt2)}
+  th{color:var(--txt3);font-weight:500}
+  td b{color:var(--txt)}
+  .pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600}
+  .pill.green{background:rgba(34,197,94,.15);color:var(--green)}
+  .pill.amber{background:rgba(245,166,35,.15);color:var(--amber)}
+  .pill.red{background:rgba(239,68,68,.15);color:var(--red)}
+  .pill.gray{background:var(--panel2);color:var(--txt3)}
+  textarea{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--txt);border-radius:6px;padding:8px;font-size:12px;font-family:ui-monospace,monospace;resize:vertical;min-height:64px}
+  .src{font-size:11px;color:var(--txt3);margin-top:8px}
+  .src b{color:var(--txt2)}
+  .err{color:var(--red);font-size:12px;padding:8px 0}
+  svg{display:block;width:100%;height:auto}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--txt2);margin:6px 0}
+  .legend i{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:4px;border-radius:2px}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.twocol{grid-template-columns:1fr}}
+  .status-lights{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
+  .sl{display:flex;align-items:center;gap:6px;font-size:12px}
+  .sl .d{width:10px;height:10px;border-radius:50%}
+</style>
+</head>
+<body>
+<header>
+  <h1>四层趋势框架 · ETF 趋势判断工具</h1>
+  <div class="ctrl">
+    <input id="codeInput" value="159516" placeholder="ETF代码 如 159516">
+    <button id="runBtn">运行分析</button>
+    <span class="hint">默认：国泰半导体设备ETF(159516) · 数据实时取自东方财富</span>
+  </div>
+  <div class="meta" id="meta">输入代码后点击「运行分析」</div>
+</header>
+
+<main>
+  <!-- 四层 RAG + 综合结论 -->
+  <div class="card">
+    <h2>四层状态总览 <span class="role">资金(T层)是验证器，不是预测器</span></h2>
+    <div class="rag" id="rag"><!-- filled by JS --></div>
+    <div class="verdict-box" id="verdict">等待分析…</div>
+  </div>
+
+  <div class="grid">
+    <!-- L1 基本面 -->
+    <div class="card">
+      <h2>L1 基本面 <span class="tag">方向锚 · 决定行情能走多远</span></h2>
+      <div id="l1body"><p class="src">运行后展示赛道产业逻辑与方向判断。</p></div>
+    </div>
+    <!-- L2 赔率 -->
+    <div class="card">
+      <h2>L2 赔率温度计 <span class="tag">安全边际标尺</span></h2>
+      <div id="l2body"><p class="src">运行后展示估值/价格分位。</p></div>
+    </div>
+  </div>
+
+  <!-- L3 趋势 -->
+  <div class="card">
+    <h2>L3 价格趋势 <span class="tag">趋势本体 · 第一优先级 · 所有信号的载体</span></h2>
+    <div class="legend" id="l3legend"></div>
+    <div id="l3chart"></div>
+    <div class="twocol" style="margin-top:10px">
+      <div>
+        <div style="font-size:12px;color:var(--txt2);margin-bottom:4px">MACD(12,26,9)</div>
+        <div id="macdchart"></div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--txt2);margin-bottom:4px">KDJ(9,3,3)</div>
+        <div id="kdjchart"></div>
+      </div>
+    </div>
+    <div class="status-lights" id="l3lights"></div>
+  </div>
+
+  <!-- L4 资金验证 -->
+  <div class="card">
+    <h2>L4 资金验证 <span class="tag">供需验证 · 最后一步才看 · 非预测信号</span></h2>
+    <div class="twocol">
+      <div>
+        <div id="l4shares"></div>
+        <div style="margin-top:10px">
+          <div style="font-size:12px;color:var(--txt2);margin-bottom:4px">份额序列（可粘贴维护，见下）</div>
+          <textarea id="sharesInput" placeholder="粘贴东方财富 ETF「份额变动」表：每行 日期,份额(亿份)&#10;例：&#10;2026-07-16,12.34&#10;2026-07-17,12.51&#10;2026-07-18,12.60"></textarea>
+          <div style="margin-top:6px"><button id="applyShares" style="background:var(--panel2);border:1px solid var(--border);color:var(--txt);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px">应用份额序列</button>
+          <span class="src" style="margin-left:8px">留空则用实时折溢价判定；粘贴后自动算 5 日累计净申赎</span></div>
+        </div>
+      </div>
+      <div>
+        <div id="l4premium"></div>
+      </div>
+    </div>
+    <div class="src" id="l4src"></div>
+  </div>
+
+  <!-- 5步复盘清单 -->
+  <div class="card">
+    <h2>极简实战复盘清单 <span class="tag">按顺序检查，缺 2 条以上 → 观望/小仓</span></h2>
+    <div id="checklist"></div>
+    <div class="verdict-box" id="checkVerdict" style="margin-top:12px">勾选后自动给结论</div>
+  </div>
+
+  <p class="src" style="text-align:center;padding:10px 0 30px">
+    数据来源：东方财富 push2his(K线) / pingzhongdata(净值) / push2delay(实时价) · 份额序列由用户维护以保证可追溯<br>
+    本报告/工具仅供参考，不构成个人投资建议。
+  </p>
+</main>
+
+<script>
+/* ============ 工具函数 ============ */
+function toSecid(code){
+  code=(code||'').trim();
+  if(/^\d+\.\d{6}$/.test(code)) return code;
+  if(/^(51|56|58|50|55|59|60|68|90|5|9)/.test(code)) return '1.'+code; // 沪
+  return '0.'+code; // 深 (00/15/16/18/30/11/12/13...)
+}
+function jsonpGet(url, cbName){
+  return new Promise((resolve,reject)=>{
+    const sc=document.createElement('script');
+    const t=setTimeout(()=>{cleanup();reject(new Error('timeout'));},15000);
+    function cleanup(){ clearTimeout(t); try{delete window[cbName];}catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); }
+    window[cbName]=(d)=>{ cleanup(); resolve(d); };
+    sc.onerror=()=>{ cleanup(); reject(new Error('script error')); };
+    sc.src=url+(url.indexOf('cb=')>=0?'':'&cb='+cbName);
+    document.head.appendChild(sc);
+  });
+}
+// K线多源容错：push2his 在部分网络/浏览器下 <script> 会被拦截(onerror)，
+// 改用与实时价同源的 push2.eastmoney.com（东财行情页标准端点，带 ut 令牌）。
+const KLINE_HOSTS=[
+  'https://push2.eastmoney.com/api/qt/stock/kline/get',
+  'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+];
+const EM_UT='fa5fd1943c7b386f172d6893dbfba10b';
+async function fetchKline(secid, limit){
+  let lastErr=null;
+  for(const host of KLINE_HOSTS){
+    try{
+      const cb='kcb'+Math.random().toString(36).slice(2);
+      const url=`${host}?secid=${secid}&ut=${EM_UT}&invt=2&fltt=2&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&end=20500101&lmt=${limit}&cb=${cb}`;
+      const d=await jsonpGet(url, cb);
+      if(d && d.data && d.data.klines && d.data.klines.length){
+        return d.data.klines.map(s=>{
+          const p=s.split(',');
+          return {date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:+p[6], amp:+(p[7]||0)};
+        });
+      }
+      lastErr=new Error('K线为空 ('+host.split('/')[2]+')');
+    }catch(e){ lastErr=e; /* 试下一个源 */ }
+  }
+  throw lastErr||new Error('K线加载失败');
+}
+function loadPzd(code){
+  // 跨域可读机制：用 <script> 标签加载，pingzhongdata 会把 netWorthTrend/fS_name 等设为父窗口全局变量（可读）；
+  // 不能用 iframe（跨域读 contentWindow 会被浏览器拦截）。
+  return new Promise((resolve)=>{
+    const t=setTimeout(()=>{ cleanup(); resolve(null); },13000);
+    let sc=null;
+    function cleanup(){ clearTimeout(t); if(sc&&sc.parentNode) sc.parentNode.removeChild(sc); }
+    sc=document.createElement('script');
+    sc.onload=()=>{ setTimeout(()=>{ try{
+        const nw=window.netWorthTrend, name=window.fS_name;
+        cleanup(); resolve(name||(nw&&nw.length)?{name:name||'', netWorthTrend:nw||[]}:null);
+      }catch(e){ cleanup(); resolve(null); } }, 600); };
+    sc.onerror=()=>{ cleanup(); resolve(null); };
+    sc.src=`https://fund.eastmoney.com/pingzhongdata/${code}.js?_=${Date.now()}`;
+    document.head.appendChild(sc);
+  });
+}
+async function fetchPrice(secid){
+  try{
+    const cb='pcb'+Math.random().toString(36).slice(2);
+    const url=`https://push2delay.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f60,f169&cb=${cb}&_=${Date.now()}`;
+    const d=await jsonpGet(url, cb);
+    const x=d&&d.data;
+    if(!x) return null;
+    return {price:x.f43/100, prevClose:x.f60/100, pct:x.f169/100, name:x.f58};
+  }catch(e){ return null; }
+}
+
+/* ============ 指标计算 ============ */
+function MA(arr, n){
+  const out=new Array(arr.length).fill(null);
+  let sum=0;
+  for(let i=0;i<arr.length;i++){
+    sum+=arr[i];
+    if(i>=n) sum-=arr[i-n];
+    if(i>=n-1) out[i]=sum/n;
+  }
+  return out;
+}
+function EMA(arr, n){
+  const k=2/(n+1), out=new Array(arr.length); let prev=arr[0]; out[0]=arr[0];
+  for(let i=1;i<arr.length;i++){ prev=arr[i]*k+prev*(1-k); out[i]=prev; }
+  return out;
+}
+function MACD(closes){
+  const e12=EMA(closes,12), e26=EMA(closes,26);
+  const dif=closes.map((_,i)=>e12[i]-e26[i]);
+  const dea=EMA(dif,9);
+  const bar=dif.map((d,i)=>2*(d-dea[i]));
+  return {dif,dea,bar};
+}
+function KDJ(klines, n=9){
+  const cls=klines.map(k=>k.close), hi=klines.map(k=>k.high), lo=klines.map(k=>k.low);
+  const K=new Array(klines.length), D=new Array(klines.length), J=new Array(klines.length);
+  let prevK=50, prevD=50;
+  for(let i=0;i<klines.length;i++){
+    let rsv;
+    if(i<n-1){ rsv=50; }
+    else{
+      let h=Math.max(...hi.slice(i-n+1,i+1)), l=Math.min(...lo.slice(i-n+1,i+1));
+      rsv = h===l?50:(cls[i]-l)/(h-l)*100;
+    }
+    const k=(2/3)*prevK+(1/3)*rsv, d=(2/3)*prevD+(1/3)*k;
+    K[i]=k; D[i]=d; J[i]=3*k-2*d; prevK=k; prevD=d;
+  }
+  return {K,D,J};
+}
+function pivots(klines, win=5){
+  const highs=[], lows=[];
+  for(let i=win;i<klines.length-win;i++){
+    let isH=true,isL=true;
+    for(let j=i-win;j<=i+win;j++){ if(klines[j].high>klines[i].high) isH=false; if(klines[j].low<klines[i].low) isL=false; }
+    if(isH) highs.push({i, price:klines[i].high});
+    if(isL) lows.push({i, price:klines[i].low});
+  }
+  return {highs,lows};
+}
+function classifyStructure(piv){
+  const hh=piv.highs, ll=piv.lows;
+  const ups = hh.length>=2 ? hh[hh.length-1].price>hh[hh.length-2].price : null;
+  const downs = ll.length>=2 ? ll[ll.length-1].price>ll[ll.length-2].price : null;
+  // downs=true 表示最近低点高于前低点 => HL(更高低点)；false => LL
+  let trend='mixed';
+  if(ups===true && downs===true) trend='uptrend';
+  else if(ups===false && downs===false) trend='downtrend';
+  return {higherHighs:ups, higherLows:downs, trend};
+}
+
+/* ============ 渲染 ============ */
+function svgWrap(inner, w, h){ return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto">${inner}</svg>`; }
+function yScale(vals, h, pad){ const mn=Math.min(...vals), mx=Math.max(...vals); const r=(mx-mn)||1; return v=> h-pad-((v-mn)/r)*(h-2*pad); }
+
+function renderTrend(klines, mas, piv){
+  const W=900, H=340, pad=18, n=klines.length;
+  const closes=klines.map(k=>k.close), highs=klines.map(k=>k.high), lows=klines.map(k=>k.low);
+  const allv=closes.concat(highs,lows); mas.forEach(m=>m.forEach(v=>{if(v!=null)allv.push(v);}));
+  const yf=yScale(allv,H,pad);
+  const x=i=> pad + i*(W-2*pad)/(n-1);
+  let s='';
+  // grid
+  for(let g=0;g<=4;g++){ const yy=pad+g*(H-2*pad)/4; s+=`<line x1="${pad}" y1="${yy}" x2="${W-pad}" y2="${yy}" stroke="#222a33" stroke-width="1"/>`; }
+  // candles
+  const cw=Math.max(1.5,(W-2*pad)/n*0.62);
+  for(let i=0;i<n;i++){
+    const k=klines[i], up=k.close>=k.open;
+    const col=up?'#ef4444':'#22c55e';
+    const xc=x(i);
+    s+=`<line x1="${xc}" y1="${yf(k.high)}" x2="${xc}" y2="${yf(k.low)}" stroke="${col}" stroke-width="1"/>`;
+    const yo=yf(k.open), yc=yf(k.close);
+    s+=`<rect x="${xc-cw/2}" y="${Math.min(yo,yc)}" width="${cw}" height="${Math.max(1,Math.abs(yc-yo))}" fill="${col}"/>`;
+  }
+  // MAs
+  const macol={'ma5':'#f5a623','ma10':'#4ea1ff','ma20':'#a78bfa','ma60':'#22c55e'};
+  mas.forEach((m,name)=>{
+    let path=''; let started=false;
+    for(let i=0;i<n;i++){ if(m[i]==null) continue; const xx=x(i),yy=yf(m[i]); path+=(started?'L':'M')+xx+' '+yy+' '; started=true; }
+    s+=`<path d="${path}" fill="none" stroke="${macol[name]}" stroke-width="1.4" opacity="0.95"/>`;
+  });
+  // pivots markers
+  piv.highs.slice(-4).forEach(p=>{ s+=`<circle cx="${x(p.i)}" cy="${yf(p.price)}" r="4" fill="none" stroke="#ef4444" stroke-width="1.5"/>`; });
+  piv.lows.slice(-4).forEach(p=>{ s+=`<circle cx="${x(p.i)}" cy="${yf(p.price)}" r="4" fill="none" stroke="#22c55e" stroke-width="1.5"/>`; });
+  // last price label
+  const last=klines[n-1]; const ly=yf(last.close);
+  s+=`<text x="${W-pad-2}" y="${ly-4}" fill="#e6edf3" font-size="11" text-anchor="end">${last.close.toFixed(3)}</text>`;
+  return svgWrap(s,W,H);
+}
+function renderOsc(data, keys, colors, name){
+  const W=440,H=140,pad=14,n=data[keys[0]].length;
+  const allv=[]; keys.forEach(k=>data[k].forEach(v=>{ if(v!=null&&isFinite(v)) allv.push(v); }));
+  const yf=yScale(allv,H,pad); const x=i=> pad + i*(W-2*pad)/(n-1);
+  let s='';
+  s+=`<line x1="${pad}" y1="${yf(0)}" x2="${W-pad}" y2="${yf(0)}" stroke="#333" stroke-width="1"/>`;
+  if(name==='MACD'){
+    for(let i=0;i<n;i++){ const v=data.bar[i]; if(v==null) continue; const xx=x(i); const y0=yf(0),y1=yf(v);
+      s+=`<rect x="${xx-1}" y="${Math.min(y0,y1)}" width="2" height="${Math.max(1,Math.abs(y1-y0))}" fill="${v>=0?'#ef4444':'#22c55e'}" opacity="0.8"/>`; }
+  }
+  keys.forEach((k,idx)=>{ let path=''; let st=false;
+    for(let i=0;i<n;i++){ const v=data[k][i]; if(v==null) continue; const xx=x(i),yy=yf(v); path+=(st?'L':'M')+xx+' '+yy+' '; st=true; }
+    s+=`<path d="${path}" fill="none" stroke="${colors[idx]}" stroke-width="1.4"/>`;
+  });
+  return svgWrap(s,W,H);
+}
+function renderShares(series){
+  if(!series || series.length<2) return '<p class="src">未提供份额序列（粘贴上方文本框后点「应用份额序列」）。</p>';
+  const W=440,H=140,pad=14;
+  const vals=series.map(s=>s.s), dates=series.map(s=>s.d);
+  const yf=yScale(vals,H,pad); const x=i=> pad + i*(W-2*pad)/(series.length-1);
+  let s='';
+  for(let g=0;g<=3;g++){ const yy=pad+g*(H-2*pad)/3; s+=`<line x1="${pad}" y1="${yy}" x2="${W-pad}" y2="${yy}" stroke="#222a33"/>`; }
+  let path=''; series.forEach((p,i)=>{ path+=(i?'L':'M')+x(i)+' '+yf(p.s)+' '; });
+  s+=`<path d="${path}" fill="none" stroke="#4ea1ff" stroke-width="1.6"/>`;
+  // 5日净申赎区间高亮
+  if(series.length>=6){ const a=series.length-6; s+=`<rect x="${x(a)}" y="${pad}" width="${x(series.length-1)-x(a)}" height="${H-2*pad}" fill="#4ea1ff" opacity="0.08"/>`; }
+  return svgWrap(s,W,H);
+}
+
+/* ============ L1 基本面（框架 + 159516 默认画像） ============ */
+const L1_PROFILE={
+  '159516':{
+    name:'国泰中证半导体材料设备ETF',
+    index:'中证半导体材料设备指数 (931743)',
+    theme:'国产半导体设备：刻蚀/薄膜沉积/清洗/CMP/量测等环节，对标北方华创、中微、拓荆、华海清科、盛美等。',
+    facts:[
+      '产业：国内晶圆厂资本开支处于超级周期，设备国产化率由约21%向43%目标推进',
+      '订单：头部设备厂订单能见度达80周以上，订单/收入比高位',
+      '风险：海外出口限制变化、晶圆厂capex节奏波动、估值高位回撤风险',
+    ],
+    checks:[true,true,true] // 产业逻辑改善 / 无重大利空 / 中期方向向上
+  }
+};
+function renderL1(code){
+  const p=L1_PROFILE[code];
+  const body=document.getElementById('l1body');
+  if(!p){
+    body.innerHTML=`<p class="src">未内置该 ETF 基本面画像，请按框架自行研判：</p>
+      <div class="chk"><input type="checkbox" data-l1="0"><span class="lab">产业逻辑边际改善（订单/capex/政策）<span class="note">而非单纯短期消息刺激</span></span></div>
+      <div class="chk"><input type="checkbox" data-l1="1"><span class="lab">无重大行业利空<span class="note">出口限制、需求断崖等</span></span></div>
+      <div class="chk"><input type="checkbox" data-l1="2"><span class="lab">中长期方向向上<span class="note">区分反弹与反转</span></span></div>`;
+    return [false,false,false];
+  }
+  let html=`<div class="kv"><span class="k">跟踪指数</span><span class="v">${p.index}</span></div>
+    <div class="kv"><span class="k">主题</span><span class="v" style="font-weight:400;font-size:12px;max-width:60%;text-align:right">${p.theme}</span></div>`;
+  p.facts.forEach(f=>html+=`<div class="kv"><span class="k">•</span><span class="v" style="font-weight:400;font-size:12px">${f}</span></div>`);
+  html+=`<div style="margin-top:8px;font-size:12px;color:var(--txt2)">方向研判（可修改）：</div>
+    <div class="chk"><input type="checkbox" data-l1="0" ${p.checks[0]?'checked':''}><span class="lab">产业逻辑边际改善</span></div>
+    <div class="chk"><input type="checkbox" data-l1="1" ${p.checks[1]?'checked':''}><span class="lab">无重大行业利空</span></div>
+    <div class="chk"><input type="checkbox" data-l1="2" ${p.checks[2]?'checked':''}><span class="lab">中长期方向向上</span></div>`;
+  body.innerHTML=html;
+  return p.checks.slice();
+}
+
+/* ============ 主流程 ============ */
+let STATE={klines:null, fund:null, price:null, shares:null, l1checks:[false,false,false], hasK:false};
+
+function parseShares(text){
+  const out=[];
+  text.split('\n').forEach(line=>{
+    const m=line.trim().match(/^(\d{4}-\d{2}-\d{2})\s*[,，\s]\s*([\d.]+)/);
+    if(m) out.push({d:m[1], s:+m[2]});
+  });
+  return out.sort((a,b)=>a.d<b.d?-1:1);
+}
+
+async function analyze(){
+  const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='分析中…';
+  const code=document.getElementById('codeInput').value.trim();
+  const secid=toSecid(code);
+  document.getElementById('meta').innerHTML='加载中：'+code+' (secid '+secid+') …';
+  // 分源容错：任一源失败都不拖垮整体，缺哪层就只标哪层
+  let klines=null, fund=null, price=null, kErr=null;
+  try{ klines=await fetchKline(secid,200); }catch(e){ kErr=e; }
+  try{ fund=await loadPzd(code); }catch(e){}
+  try{ price=await fetchPrice(secid); }catch(e){}
+  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.hasK=!!klines;
+  STATE.l1checks=renderL1(code);
+  document.getElementById('rag').innerHTML='';
+  document.getElementById('verdict').innerHTML='分析完成';
+
+  // L3 / L2 依赖 K线：缺失则明确降级，不崩
+  if(!klines){
+    document.getElementById('l3chart').innerHTML=
+      `<div class="err">⚠ K线加载失败：${kErr?kErr.message:'未知错误'}。<br>多为东财 K线接口临时跨域/网络拦截。可点「运行分析」重试；若持续失败，多为当前网络环境对该接口的限制。</div>`;
+    document.getElementById('l3legend').innerHTML='';
+    document.getElementById('macdchart').innerHTML='';
+    document.getElementById('kdjchart').innerHTML='';
+    document.getElementById('l3lights').innerHTML='';
+    document.getElementById('l2body').innerHTML='<p class="src">K线缺失，赔率分位暂无法计算（需价格序列）。</p>';
+    renderL4(klines, fund, price);
+    computeRAG(null,null,null,null,null,null);
+    const nm=(price&&price.name)||(fund&&fund.name)||code;
+    document.getElementById('meta').innerHTML=`标的：<b>${nm}</b> · K线数据缺失，仅展示可用层（L1 基本面 / L4 资金）。`;
+    renderChecklist();
+    btn.disabled=false; btn.textContent='运行分析'; return;
+  }
+
+  const closes=klines.map(k=>k.close);
+  const ma5=MA(closes,5), ma10=MA(closes,10), ma20=MA(closes,20), ma60=MA(closes,60);
+  const macd=MACD(closes);
+  const kdj=KDJ(klines);
+  const piv=pivots(klines,5);
+  const struc=classifyStructure(piv);
+
+  // ---- L2 赔率（价格分位 vs 近52周） ----
+  const win=Math.min(252, closes.length);
+  const slice=closes.slice(closes.length-win);
+  const lo52=Math.min(...slice), hi52=Math.max(...slice);
+  const cur=closes[closes.length-1];
+  const pct=hi52===lo52?50:(cur-lo52)/(hi52-lo52)*100;
+  renderL2(pct, lo52, hi52, cur);
+
+  // ---- L3 渲染 ----
+  document.getElementById('l3chart').innerHTML=renderTrend(klines,[ma5,ma10,ma20,ma60],piv);
+  document.getElementById('l3legend').innerHTML=`
+    <span><i style="background:#f5a623"></i>MA5</span><span><i style="background:#4ea1ff"></i>MA10</span>
+    <span><i style="background:#a78bfa"></i>MA20</span><span><i style="background:#22c55e"></i>MA60</span>
+    <span><i style="background:#ef4444"></i>高点</span><span><i style="background:#22c55e"></i>低点</span>`;
+  document.getElementById('macdchart').innerHTML=renderOsc(macd,['dif','dea'],['#f5a623','#4ea1ff'],'MACD');
+  document.getElementById('kdjchart').innerHTML=renderOsc(kdj,['K','D','J'],['#ef4444','#4ea1ff','#a78bfa'],'KDJ');
+  renderL3Lights(struc, macd, closes, ma20, ma60);
+
+  // ---- L4 ----
+  renderL4(klines, fund, price);
+
+  // ---- RAG + 结论 ----
+  computeRAG(pct, struc, macd, closes, ma20, ma60);
+
+  // ---- meta ----
+  const nm=(price&&price.name)||(fund&&fund.name)||code;
+  document.getElementById('meta').innerHTML=
+    `标的：<b>${nm}</b> · 代码 ${code} · 数据区间 ${klines[0].date} ~ ${klines[klines.length-1].date}（${klines.length}交易日）· 现价 <b>${price?price.price.toFixed(3):cur.toFixed(3)}</b>`;
+
+  renderChecklist();
+  btn.disabled=false; btn.textContent='运行分析';
+}
+
+function ragDot(c){ return `<span class="dot ${c}"></span>`; }
+function renderL2(pct, lo52, hi52, cur){
+  const col = pct<30?'var(--green)':(pct>70?'var(--red)':'var(--amber)');
+  const lvl = pct<30?'低位 · 赔率好':(pct>70?'高位 · 警惕':'中位 · 中性');
+  document.getElementById('l2body').innerHTML=`
+    <div class="kv"><span class="k">当前价</span><span class="v">${cur.toFixed(3)}</span></div>
+    <div class="kv"><span class="k">近52周区间</span><span class="v">${lo52.toFixed(3)} ~ ${hi52.toFixed(3)}</span></div>
+    <div class="kv"><span class="k">价格分位</span><span class="v" style="color:${col}">${pct.toFixed(1)}% · ${lvl}</span></div>
+    <div class="gauge"><div class="fill" style="width:${pct}%;background:${col}"></div><div class="mark" style="left:30%"></div><div class="mark" style="left:70%"></div></div>
+    <div class="scale-row"><span>0% 低位</span><span>30%</span><span>70%</span><span>100% 高位</span></div>
+    <p class="src">说明：主题指数精确 PE/PB 5年分位东财跨域暂不可得，此处以「价格分位」代理赔率。低位利空易钝化、高位利好易兑现。</p>`;
+}
+function renderL3Lights(struc, macd, closes, ma20, ma60){
+  const n=closes.length;
+  const price=closes[n-1];
+  const maAligned = price>ma20[n-1] && ma20[n-1]>ma60[n-1];
+  const macdBull = macd.dif[n-1]>macd.dea[n-1];
+  const html=`
+    <div class="sl"><span class="d" style="background:${struc.trend==='uptrend'?'var(--green)':struc.trend==='downtrend'?'var(--red)':'var(--amber)'}"></span>结构：${struc.trend==='uptrend'?'上升(高高低抬)':struc.trend==='downtrend'?'下降(高低下移)':'震荡'}</div>
+    <div class="sl"><span class="d" style="background:${maAligned?'var(--green)':'var(--red)'}"></span>均线：${maAligned?'多头排列':'非多头'}</div>
+    <div class="sl"><span class="d" style="background:${macdBull?'var(--green)':'var(--red)'}"></span>MACD：${macdBull?'DIF>DEA(偏多)':'DIF<DEA(偏空)'}</div>`;
+  document.getElementById('l3lights').innerHTML=html;
+}
+function renderL4(klines, fund, price){
+  const body=document.getElementById('l4shares');
+  const series=STATE.shares;
+  let html=renderShares(series);
+  let net5=null, netTxt='待数据';
+  if(series && series.length>=6){
+    let d=0; for(let i=series.length-5;i<series.length;i++) d+=(series[i].s-series[i-1].s);
+    net5=d; netTxt=(d>=0?'+':'')+d.toFixed(2)+' 亿份';
+  }
+  STATE._net5=net5;
+  html+=`<div class="kv" style="margin-top:6px"><span class="k">5日累计净申赎</span><span class="v">${netTxt}</span></div>`;
+  body.innerHTML=html;
+
+  // 折溢价（实时）
+  const nav=(fund&&fund.netWorthTrend&&fund.netWorthTrend.length)? +fund.netWorthTrend[fund.netWorthTrend.length-1].y : null;
+  const px=price?price.price:(klines&&klines.length?klines[klines.length-1].close:null);
+  let prem=null, premHtml='';
+  if(nav&&nav>0&&px!=null){
+    prem=(px-nav)/nav*100;
+    const col=Math.abs(prem)>3?'var(--red)':(Math.abs(prem)>1?'var(--amber)':'var(--green)');
+    const lab=Math.abs(prem)>3?'高溢价·套利陷阱风险':(Math.abs(prem)>1?'溢价偏大':'正常区间');
+    premHtml=`<div class="kv"><span class="k">单位净值(官方)</span><span class="v">${nav.toFixed(4)}</span></div>
+      <div class="kv"><span class="k">现价</span><span class="v">${px.toFixed(3)}</span></div>
+      <div class="kv"><span class="k">折溢价</span><span class="v" style="color:${col}">${prem>=0?'+':''}${prem.toFixed(2)}% · ${lab}</span></div>`;
+  }else{
+    premHtml=`<p class="src">净值获取失败，折溢价不可用。</p>`;
+  }
+  document.getElementById('l4premium').innerHTML=`<div style="font-size:12px;color:var(--txt2);margin-bottom:4px">实时折溢价（套利陷阱监测）</div>${premHtml}`;
+  STATE._prem=prem;
+  document.getElementById('l4src').innerHTML=`<b>数据源</b>：折溢价＝现价(东财push2delay) ÷ 单位净值(pingzhongdata) − 1，实时；份额序列由用户粘贴维护（东方财富 ETF 页「份额变动」可复制）。`;
+}
+
+/* ---- RAG 计算 ---- */
+function setRAG(idx, name, role, color, verdict){
+  const el=document.getElementById('rag');
+  const div=document.createElement('div'); div.className='lyr';
+  div.innerHTML=`<div class="name">${name}</div>${ragDot(color)}<div class="verdict" style="color:${color==='green'?'var(--green)':color==='red'?'var(--red)':'var(--amber)'}">${verdict}</div><div class="role" style="font-size:10px;color:var(--txt3);margin-top:4px">${role}</div>`;
+  el.appendChild(div);
+}
+function computeRAG(pct, struc, macd, closes, ma20, ma60){
+  const el=document.getElementById('rag'); el.innerHTML='';
+  // 无 K线：趋势层不可用，只给 L1/L4 与明确提示，不崩
+  if(!STATE.hasK || !STATE.klines){
+    const l1c=STATE.l1checks.filter(Boolean).length;
+    const L1=l1c===3?'green':(l1c>=1?'amber':'red');
+    let L4='amber';
+    if(STATE._prem!=null && Math.abs(STATE._prem)>3) L4='red';
+    else if(STATE.shares && STATE.shares.length>=6) L4=(STATE._net5>0)?'green':'amber';
+    setRAG(0,'L1 基本面','方向锚',L1, L1==='green'?'偏多':L1==='amber'?'中性':'偏弱');
+    setRAG(1,'L2 赔率','安全边际','gray','数据缺失');
+    setRAG(2,'L3 价格趋势','趋势本体','gray','数据缺失');
+    setRAG(3,'L4 资金','验证器',L4, L4==='green'?'确认流入':L4==='amber'?'待数据':L4==='red'?'高溢价':'流出');
+    const vb=document.getElementById('verdict');
+    vb.innerHTML=`综合结论：<span style="color:var(--amber)">趋势层(K线)数据缺失，无法给出交易结论</span><div class="sub">仅 L1 基本面与 L4 资金可用。请重试 K 线加载（多为东财接口临时拦截），恢复后重跑即可。</div>`;
+    return;
+  }
+  const n=closes.length;
+  const price=closes[n-1];
+  const maAligned=price>ma20[n-1]&&ma20[n-1]>ma60[n-1];
+  const macdBull=macd.dif[n-1]>macd.dea[n-1];
+
+  // L1
+  const l1c=STATE.l1checks.filter(Boolean).length;
+  const L1 = l1c===3?'green':(l1c>=1?'amber':'red');
+  // L2
+  const L2 = pct<30?'green':(pct>70?'red':'amber');
+  // L3
+  let L3;
+  if(struc.trend==='uptrend'&&maAligned&&macdBull) L3='green';
+  else if(struc.trend==='downtrend'||(!maAligned&&!macdBull)) L3='red';
+  else L3='amber';
+  // L4
+  const prem=STATE._prem;
+  let L4;
+  if(prem!=null && Math.abs(prem)>3) L4='red';
+  else if(STATE.shares && STATE.shares.length>=6){ L4 = (STATE._net5>0)?'green':'amber'; }
+  else L4='amber';
+
+  setRAG(0,'L1 基本面','方向锚',L1, L1==='green'?'偏多':L1==='amber'?'中性':'偏弱');
+  setRAG(1,'L2 赔率','安全边际',L2, L2==='green'?'低位好':L2==='amber'?'中位':'高位慎');
+  setRAG(2,'L3 价格趋势','趋势本体',L3, L3==='green'?'上升':L3==='amber'?'震荡':'下降');
+  setRAG(3,'L4 资金','验证器',L4, L4==='green'?'确认流入':L4==='amber'?'待数据':L4==='red'&&Math.abs(prem)>3?'高溢价':'流出');
+
+  const greens=[L1,L2,L3,L4].filter(c=>c==='green').length;
+  const reds=[L1,L2,L3,L4].filter(c=>c==='red').length;
+  let v, sub;
+  if(L3==='red'){ v='价格处下降趋势 — 禁止左侧重仓抄底，仅小仓试错/观望'; sub='单凭资金数据逆势抄底，是散户最常见亏损来源。等价格走出底部结构（不再创新低、突破压力）再谈右侧。'; }
+  else if(L2==='red'){ v='估值处历史高位 — 警惕利好兑现，不追高'; sub='高位区资金稍有松动就容易大跌；若参与也只宜等回调后的右侧，绝不在高位靠资金流入追进。'; }
+  else if(L4==='red'&&Math.abs(prem)>3){ v='高溢价套利陷阱 — 反弹可信度低，观望'; sub='溢价>3% 多为套利盘主导，随时兑现；不要把它当成"资金看好"。'; }
+  else if(greens>=3){ v='四层共振偏多 — 可右侧顺势参与（仓位管理优先）'; sub='趋势启动后资金确认、估值不贵、基本面无利空 → 吃鱼身，放弃鱼头鱼尾。'; }
+  else { v='信号不完整 — 观望或小仓博弈'; sub='缺2条以上确认信号时，不重仓。先满足极简复盘清单再动手。'; }
+  const vb=document.getElementById('verdict');
+  vb.innerHTML=`综合结论：<span style="color:${reds>0&&L3!=='green'?'var(--red)':greens>=3?'var(--green)':'var(--amber)'}">${v}</span><div class="sub">${sub}</div>`;
+}
+
+/* ---- 5步复盘清单 ---- */
+const CHECKS=[
+  {t:'大盘赚钱效应（个股涨跌中位数）好不好？系统性风险大不大？',n:'A股个股涨跌中位数、全市场成交额'},
+  {t:'赛道基本面有没有边际改善？还是仅短期消息刺激？',n:'产业 capex/订单/政策，而非一日游题材'},
+  {t:'指数估值处于高位还是低位？赔率如何？',n:'对应 L2 价格分位'},
+  {t:'K线价格结构：是否结束下降趋势，高低点开始改善？',n:'对应 L3 结构/HH-HL'},
+  {t:'最后核对 ETF 一级市场数据：份额、5日净申赎，并查折溢价排除套利干扰',n:'对应 L4'},
+];
+function renderChecklist(){
+  const el=document.getElementById('checklist'); el.innerHTML='';
+  CHECKS.forEach((c,i)=>{
+    const div=document.createElement('div'); div.className='chk';
+    div.innerHTML=`<input type="checkbox" data-chk="${i}"><span class="lab">${i+1}. ${c.t}<span class="note">${c.n}</span></span>`;
+    el.appendChild(div);
+  });
+  el.querySelectorAll('input[data-chk]').forEach(inp=>{
+    inp.addEventListener('change', updateCheckVerdict);
+  });
+  updateCheckVerdict();
+}
+function updateCheckVerdict(){
+  const checked=document.querySelectorAll('#checklist input[data-chk]:checked').length;
+  const cv=document.getElementById('checkVerdict');
+  let v, col;
+  if(checked>=4){ v='复盘缺口≤1 → 高价值机会，可右侧参与'; col='var(--green)'; }
+  else if(checked>=3){ v='缺口2条 → 观望或小仓博弈'; col='var(--amber)'; }
+  else { v='缺口≥3条 → 坚决观望，不参与'; col='var(--red)'; }
+  cv.innerHTML=`清单结论：<span style="color:${col}">${v}</span><div class="sub">已勾选 ${checked}/5 项。配套四层 RAG 一起看，二者冲突时以价格趋势(L3)为准。</div>`;
+}
+
+/* ---- 事件 ---- */
+document.getElementById('runBtn').addEventListener('click', analyze);
+document.getElementById('codeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') analyze(); });
+document.getElementById('applyShares').addEventListener('click', ()=>{
+  STATE.shares=parseShares(document.getElementById('sharesInput').value);
+  if(STATE.klines){ renderL4(STATE.klines, STATE.fund, STATE.price); recomputeRAGLite(); }
+});
+function recomputeRAGLite(){
+  if(!STATE.klines) return;
+  const closes=STATE.klines.map(k=>k.close);
+  const ma20=MA(closes,20), ma60=MA(closes,60), macd=MACD(closes);
+  const struc=classifyStructure(pivots(STATE.klines,5));
+  const win=Math.min(252,closes.length); const sl=closes.slice(closes.length-win);
+  const pct=(closes[closes.length-1]-Math.min(...sl))/(Math.max(...sl)-Math.min(...sl))*100;
+  // 重算 L4 net5
+  if(STATE.shares&&STATE.shares.length>=6){ let d=0; for(let i=STATE.shares.length-5;i<STATE.shares.length;i++) d+=(STATE.shares[i].s-STATE.shares[i-1].s); STATE._net5=d; }
+  computeRAG(pct, struc, macd, closes, ma20, ma60);
+}
+// 默认加载
+analyze();
+</script>
+</body>
+</html>
