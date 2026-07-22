@@ -83,7 +83,7 @@
   <div class="ctrl">
     <input id="codeInput" value="159516" placeholder="ETF代码 如 159516">
     <button id="runBtn">运行分析</button>
-    <span class="hint">默认：国泰半导体设备ETF(159516) · 数据实时取自东方财富</span>
+    <span class="hint">默认：国泰半导体设备ETF(159516) · K线取自腾讯gtimg，净值/资金取自东方财富</span>
   </div>
   <div class="meta" id="meta">输入代码后点击「运行分析」</div>
 </header>
@@ -155,7 +155,7 @@
   </div>
 
   <p class="src" style="text-align:center;padding:10px 0 30px">
-    数据来源：东方财富 push2.eastmoney.com(K线) / pingzhongdata(净值+总份额+净申赎) / push2delay(实时价) · L4 资金数据全自动获取，无需手动粘贴<br>
+    数据来源：腾讯 gtimg(前复权K线) / pingzhongdata(净值+总份额+净申赎) / 东财push2delay(实时价) · L4 资金数据全自动获取，无需手动粘贴<br>
     本报告/工具仅供参考，不构成个人投资建议。
   </p>
 </main>
@@ -179,30 +179,49 @@ function jsonpGet(url, cbName){
     document.head.appendChild(sc);
   });
 }
-// K线多源容错：push2his 在部分网络/浏览器下 <script> 会被拦截(onerror)，
-// 改用与实时价同源的 push2.eastmoney.com（东财行情页标准端点，带 ut 令牌）。
+// K线主源：腾讯 gtimg（web.ifzq.gtimg.cn）
+//   - 浏览器跨域可用（响应头 Access-Control-Allow-Origin: *），用 fetch 直取，无需 JSONP 封装
+//   - 复权口径(前复权)与实时价 push2delay 一致，末值对得上
+// 回退源：东财 push2（部分网络下可用，但曾出现返回空 klines，仅作兜底）
 const KLINE_HOSTS=[
   'https://push2.eastmoney.com/api/qt/stock/kline/get',
   'https://push2his.eastmoney.com/api/qt/stock/kline/get'
 ];
 const EM_UT='fa5fd1943c7b386f172d6893dbfba10b';
 async function fetchKline(secid, limit){
-  let lastErr=null;
-  for(const host of KLINE_HOSTS){
-    try{
-      const cb='kcb'+Math.random().toString(36).slice(2);
-      const url=`${host}?secid=${secid}&ut=${EM_UT}&invt=2&fltt=2&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&end=20500101&lmt=${limit}&cb=${cb}`;
-      const d=await jsonpGet(url, cb);
-      if(d && d.data && d.data.klines && d.data.klines.length){
-        return d.data.klines.map(s=>{
-          const p=s.split(',');
-          return {date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:+p[6], amp:+(p[7]||0)};
-        });
-      }
-      lastErr=new Error('K线为空 ('+host.split('/')[2]+')');
-    }catch(e){ lastErr=e; /* 试下一个源 */ }
+  const mkt = secid.startsWith('0.') ? 'sz' : 'sh';
+  const code = secid.split('.')[1];
+  // —— 主源：腾讯 gtimg（fetch + CORS *）——
+  try{
+    const url=`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mkt}${code},day,,,${limit},qfq`;
+    const r=await fetch(url);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const node=d&&d.data ? (d.data[mkt+code]||d.data[code]||(Object.values(d.data)[0])) : null;
+    const arr=node ? (node.qfqday||node.day||null) : null;
+    if(arr && arr.length){
+      return arr.map(p=>({date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:0, amp:0}));
+    }
+    throw new Error('gtimg K线为空');
+  }catch(gErr){
+    // —— 回退：东财 push2（JSONP）——
+    let lastErr=gErr;
+    for(const host of KLINE_HOSTS){
+      try{
+        const cb='kcb'+Math.random().toString(36).slice(2);
+        const url=`${host}?secid=${secid}&ut=${EM_UT}&invt=2&fltt=2&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&end=20500101&lmt=${limit}&cb=${cb}`;
+        const d=await jsonpGet(url, cb);
+        if(d && d.data && d.data.klines && d.data.klines.length){
+          return d.data.klines.map(s=>{
+            const p=s.split(',');
+            return {date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:+p[6], amp:+(p[7]||0)};
+          });
+        }
+        lastErr=new Error('K线为空 ('+host.split('/')[2]+')');
+      }catch(e){ lastErr=e; }
+    }
+    throw lastErr;
   }
-  throw lastErr||new Error('K线加载失败');
 }
 function loadPzd(code){
   // 跨域可读机制：用 <script> 标签加载，pingzhongdata 会把 netWorthTrend/fS_name 等设为父窗口全局变量（可读）；
@@ -229,7 +248,11 @@ async function fetchPrice(secid){
     const d=await jsonpGet(url, cb);
     const x=d&&d.data;
     if(!x) return null;
-    return {price:x.f43/100, prevClose:x.f60/100, pct:x.f169/100, name:x.f58};
+    // 单位：ETF/基金(15/16/18/51/56/58) 价格用 /1000；A股用 /100
+    const code=secid.split('.')[1];
+    const isFund=/^(15|16|18|51|56|58)/.test(code);
+    const unit=isFund?1000:100;
+    return {price:x.f43/unit, prevClose:x.f60/unit, pct:x.f169/100, name:x.f58};
   }catch(e){ return null; }
 }
 
