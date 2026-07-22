@@ -197,7 +197,10 @@ async function fetchKline(secid, limit){
   // —— 主源：腾讯 gtimg（fetch + CORS *）——
   try{
     const url=`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mkt}${code},day,,,${limit},qfq`;
-    const r=await fetch(url);
+    const ctrl=new AbortController();
+    const to=setTimeout(()=>ctrl.abort(),12000);
+    const r=await fetch(url,{signal:ctrl.signal});
+    clearTimeout(to);
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
     const node=d&&d.data ? (d.data[mkt+code]||d.data[code]||(Object.values(d.data)[0])) : null;
@@ -460,6 +463,7 @@ function parseShares(text){
 
 async function analyze(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='分析中…';
+  try{
   const code=document.getElementById('codeInput').value.trim();
   const secid=toSecid(code);
   document.getElementById('meta').innerHTML='加载中：'+code+' (secid '+secid+') …';
@@ -532,7 +536,8 @@ async function analyze(){
 
   renderChecklist();
   fetchSectorResearch();
-  btn.disabled=false; btn.textContent='运行分析';
+  }catch(e){ console.error('analyze error:', e); try{ document.getElementById('meta').innerHTML='分析出错：'+(e&&e.message?e.message:e)+'（按钮已解锁，可重试）'; }catch(_){} }
+  finally{ btn.disabled=false; btn.textContent='运行分析'; }
 }
 
 function ragDot(c){ return `<span class="dot ${c}"></span>`; }
@@ -608,7 +613,8 @@ async function fetchSectorResearch(){
     const end=ymd(new Date()), start=ymd(new Date(Date.now()-90*864e5));
     const kw=encodeURIComponent(theme);
     const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=30&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}`;
-    const r=await fetch(url); if(!r.ok) return;
+    const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),10000);
+    const r=await fetch(url,{signal:ctrl.signal}); clearTimeout(to); if(!r.ok) return;
     const d=await r.json();
     const cnt=(d&&d.data)?d.data.length:0;
     STATE.research={ok:true, count:cnt};
@@ -852,11 +858,22 @@ const CHECKS=[
   },
 ];
 
+/* 当某项无法自动判定时，给出明确的「如何校验」步骤（代替无用的"需你自判"） */
+const GUIDES=[
+  '打开东方财富/同花顺「涨跌家数」看「上涨家数占比」+ 全市场成交额。判定：上涨占比≥45% 且 个股涨幅中位数≥+0.1% 且 成交额≥6000亿 → 勾（系统性环境友好）；否则不勾。',
+  '①看近20日K线是否持续抬升、连续创新高≥2次（结构持续性）；②东方财富研报中心搜赛道关键词，看近90天研报数量（密集=机构关注）；③搜产业新闻确认订单/capex/政策边际。判定：结构持续+研报密集+无重大利空 → 勾；纯单日脉冲消息 → 不勾。',
+  '东方财富/中证指数官网查该指数「PE/PB 5年历史分位」。判定：分位<75%（不贵）→ 勾；>75%（高位警惕）→ 不勾。若仅看价格，当前价处于近52周低位/高位同理。',
+  '看K线——最近一个低点是否高于前一个低点(HL)、最近一个高点是否高于前一个高点(HH)；且收盘价站上MA20并MA20>MA60（均线多头）。判定：结构上升或震荡+均线多头 → 勾；明确下降(高低点下移) → 不勾。',
+  '集思录/东方财富查该ETF「场内折溢价」与基金公告「份额变动」。判定：折溢价|x|≤3% 且 近5日净申赎≥-5亿份 → 勾；溢价>3%（多为套利盘主导，反弹可信度低）或大幅净赎回 → 不勾。'
+];
+
 function renderChecklist(){
+  const CHK_AUTO=[];
   const el=document.getElementById('checklist'); el.innerHTML='';
   CHECKS.forEach((c,i)=>{
     const div=document.createElement('div'); div.className='chk';
     let autoVal=null; try{ autoVal=c.judge(); }catch(e){}
+    CHK_AUTO[i]=autoVal;
     const manual=autoVal==='manual';
     const autoChecked=autoVal===true;
     div.innerHTML=`<input type="checkbox" data-chk="${i}" ${autoChecked?'checked':''} ${manual?'data-manual="1"':''}>
@@ -877,9 +894,12 @@ function renderChecklist(){
     try{ txt=c.evi(); }catch(e){}
     const isManual = c.judge && c.judge()==='manual';
     if(isManual){
-      ev.innerHTML=`<span class="src" style="color:var(--amber)">⚠ 需你自判</span>`;
+      const g=GUIDES[i];
+      ev.innerHTML=`<span class="src" style="color:var(--amber)">⚠ 数据缺失·需你校验</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 如何校验：${g}</div>`;
     }else if(txt){
-      ev.innerHTML=`<span class="src">${txt}</span>`;
+      const autoChecked=CHK_AUTO[i]===true;
+      const tag=autoChecked?'<span style="color:var(--green)">✓系统已自动勾选</span> ':'<span style="color:var(--txt3)">✗系统未通过</span> ';
+      ev.innerHTML=`${tag}<span class="src">${txt}</span>`;
     }else{
       ev.innerHTML=`<span class="src">无依据</span>`;
     }
