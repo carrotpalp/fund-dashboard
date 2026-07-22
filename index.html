@@ -802,6 +802,15 @@ html.light .theme-btn::after{content:'☀️';left:16px}
     </div>
   </div>
 
+  <!-- Row 3.6: AI 复盘（四层框架 + 水下层，收盘后自动生成，明确建议） -->
+  <div class="gr r2">
+    <div class="panel" style="border-color:var(--accent,#4ea1ff)">
+      <div class="ph"><span class="pt">🤖 AI 复盘 <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">自动生成 · 四层框架 + 水下层(主力意图/人性博弈代理) · 明确建议</span></span>
+        <span class="ps"><button id="recapBtn" class="wl-io-btn" title="重新拉取全部自选股生成复盘">重新生成</button></span></div>
+      <div class="pb"><div id="aiRecap"><div class="fw-loading">正在生成复盘（自动拉取各标的数据，无需操作）…</div></div></div>
+    </div>
+  </div>
+
   <!-- Row 4: Signals -->
   <div class="panel rec-panel">
     <div class="ph"><span class="pt">重要信号与异动监控</span><span class="ps">仅推送规则强度≥0.8 的可执行信号（大盘 / 行业 / 自选个股及ETF），实时源优先</span></div>
@@ -912,6 +921,7 @@ const STATE = {
   mainFlow:null, etfFlow:null, etfRealtimeInflow:null,
   northbound:null, southbound:null, breadthHistory:[], sectorMode:'net', sectorFlowHist:null
 };
+window.STATE = STATE;   // 暴露给 framework.js（AI复盘读取自选股）
 let fastMs = 1000;
 // 实时代理：留空则直连东财/腾讯；若你运行了 proxy_server.py（单文件、标准库、无依赖、CORS*），
 // 把它设为该服务地址（如 http://你的IP:8899 ），页面即走服务端实时代理，广度/行业/北向不再滞后。
@@ -5265,6 +5275,17 @@ renderWatchlist();      // 立即渲染已保存的自选股（避免在1s刷新
   startTimers();
   initPanelResize();
 try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener('click', resetPanelLayout); }catch(e){ console.error('resetLayout',e); }
+</script>
+
+<!-- AI复盘 引擎（四层框架 + 水下层，共享于 trend.html L5） -->
+<script src="framework.js"></script>
+<script>
+  (function(){
+    function go(){ try{ if(window.FW) FW.renderRecap(document.getElementById('aiRecap')); }catch(e){ console.error('recap',e); } }
+    if(document.readyState!=='loading') setTimeout(go,400);
+    else document.addEventListener('DOMContentLoaded', function(){ setTimeout(go,400); });
+    var b=document.getElementById('recapBtn'); if(b) b.onclick=go;
+  })();
 </script>
 </body>
 </html>

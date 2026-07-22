@@ -150,6 +150,12 @@
     <div class="src" id="l4src"></div>
   </div>
 
+  <!-- L5 水下层：主力意图 / 人性博弈 量化代理 -->
+  <div class="card">
+    <h2>L5 水下层 · 主力意图/人性博弈 <span class="tag">表面数据之下的深层逻辑 · 量化代理非读心</span></h2>
+    <div id="l5uw"><p class="src">运行分析后展示筹码分布、主力资金流、量价背离等水下信号（来自 framework.js）。</p></div>
+  </div>
+
   <!-- 5步复盘清单 -->
   <div class="card">
     <h2>极简实战复盘清单 <span class="tag">按顺序检查，缺 2 条以上 → 观望/小仓</span></h2>
@@ -164,6 +170,7 @@
   </p>
 </main>
 
+<script src="framework.js"></script>
 <script>
 /* ============ 工具函数 ============ */
 function toSecid(code){
@@ -520,6 +527,8 @@ async function analyze(){
   // 价格源：场外基金用最新净值；个股/ETF 用实时价(push2delay，港股走 116.)
   let priceSecid = isOCF ? null : (ni.isHK ? '116.'+ni.code : toSecid(ni.code));
   try{ price=await fetchPrice(priceSecid); }catch(e){}
+  let quoteFlow=null;
+  if(priceSecid && window.FW && window.FW.fetchQuoteFlow){ try{ quoteFlow=await window.FW.fetchQuoteFlow(priceSecid); }catch(e){} }
   if(isOCF && fund){ const nw=fund.netWorthTrend; if(nw&&nw.length) price={price:nw[nw.length-1].y, prevClose:(nw.length>1?nw[nw.length-2].y:0), pct:0, name:fund.name}; }
   // K线/价格序列源
   if(isOCF){
@@ -532,7 +541,7 @@ async function analyze(){
     }
   }
   try{ STATE.market=await fetchMarketBreadth(); }catch(e){ STATE.market=null; }
-  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.hasK=!!klines; STATE.srcInfo=srcInfo;
+  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.quoteFlow=quoteFlow; STATE.hasK=!!klines; STATE.srcInfo=srcInfo;
   STATE.l1checks=renderL1(code);
   document.getElementById('rag').innerHTML='';
   document.getElementById('verdict').innerHTML='分析完成';
@@ -584,6 +593,9 @@ async function analyze(){
 
   // ---- L4 ----
   renderL4(klines, fund, price);
+
+  // ---- L5 水下层（framework.js） ----
+  if(window.FW) FW.renderL5(document.getElementById('l5uw'), klines, quoteFlow);
 
   // ---- RAG + 结论 ----
   computeRAG(pct, struc, macd, closes, ma20, ma60);
@@ -650,7 +662,7 @@ function sustainSignal(klines){
   const days=n-1-lowIdx;
   const seg=klines.slice(lowIdx);
   const pv=pivots(seg,5);
-  const hh=pv.H.length;
+  const hh=pv.highs.length;
   const half=Math.max(1,Math.floor(days/2));
   const recentVol=avg(vols.slice(n-half)), prevVol=avg(vols.slice(lowIdx, n-half));
   const volUp= prevVol>0 && recentVol>prevVol*1.05;
