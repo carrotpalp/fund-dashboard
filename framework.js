@@ -430,10 +430,10 @@
       else { score-=1; reasons.push('估值偏贵('+L.L2.pct.toFixed(0)+'分位)，上方空间受限'); }
     }
     if(L.L3){
-      if(L.L3.trend==='uptrend'){ T=1; reasons.push('价格高低点抬高、均线多头，趋势向上'); }
-      else if(L.L3.trend==='downtrend'){ T=-1; reasons.push('价格创新低、均线空头，趋势向下'); }
-      else if(L.L3.maBull){ T=0.5; reasons.push('震荡但均线仍多头'); }
-      else if(L.L3.maBear){ T=-0.5; reasons.push('价格均线空头排列，结构偏弱'); }
+      if(L.L3.trend==='uptrend'){ T=1; score+=0.5; reasons.push('价格高低点抬高、均线多头，趋势向上(本体确认)'); }
+      else if(L.L3.trend==='downtrend'){ T=-1; reasons.push('价格创新低、均线空头，趋势向下(不逆势)'); }
+      else if(L.L3.maBull){ T=0.5; score+=0.3; reasons.push('震荡但均线仍多头(结构偏多)'); }
+      else if(L.L3.maBear){ T=-0.5; score-=0.3; reasons.push('价格均线空头排列，结构偏弱'); }
       else reasons.push('价格结构震荡（均线无明确方向）'); }
     if(L.L2b){ if(L.L2b.sustained){ score+=0.5; reasons.push('上涨结构持续'+L.L2b.days+'日且放量，偏基本面驱动'); } else reasons.push('上涨持续性不足(偏短线脉冲)'); }
     if(L.L4.isETF||L.L4.isOCF){
@@ -477,16 +477,19 @@
     let riskOff=false, riskOn=false;
     if(mk){
       riskOff = mk.median<0 && mk.upPct<45;
-      riskOn = mk.median>0.3 && mk.upPct>55;
+      riskOn = mk.upPct>=55 && mk.median>0;
       if(riskOff){ score-=0.5; reasons.push('大盘偏弱(中位'+mk.median.toFixed(2)+'%·涨'+mk.upPct.toFixed(0)+'%)：系统性环境不利，降低风险暴露'); }
       else if(riskOn){ score+=0.3; reasons.push('大盘偏强(中位'+mk.median.toFixed(2)+'%·涨'+mk.upPct.toFixed(0)+'%)：顺势环境'); }
     }
     // 个股权威维度声明：价格趋势(L3)为本体 + 主力资金流(L5)为最终验证与加权
     const isStock = !(L.L4.isETF||L.L4.isOCF);
     if(isStock) reasons.unshift('【个股·权威维度】价格趋势(L3)为本体，主力资金流(L5)为最终验证与加权项');
-    // 硬约束：趋势向下 + 主力流出 → 明确不建议（不接下落刀）
-    let call = (T<=-0.5 && F<=-0.5) ? '不建议' : (score>=2 ? '建议买入' : '观望');
-    if(riskOff && call==='建议买入' && !(T>=0.5 && F>=0.5)) call='观望';
+    // 硬约束：下降趋势 + 主力流出 → 明确不建议（不接下落刀）；绝不逆势抄底
+    let call = (T<=-0.5 && F<=-0.5) ? '不建议' : '观望';
+    if(call!=='不建议'){
+      const trendOk = (L.L3 && (L.L3.trend==='uptrend' || L.L3.maBull));
+      if(score>=1.5 && trendOk) call='建议买入';
+    }
     return {call, score:+score.toFixed(2), reasons};
   }
 
@@ -651,7 +654,7 @@
     </div>`;
     const mk=breadth;
     let regimeTxt='中性环境', regimeCls='fw-pill-hold';
-    if(mk){ if(mk.median<0 && mk.upPct<45){ regimeTxt='系统性偏弱·降仓'; regimeCls='fw-pill-sell'; } else if(mk.median>0.3 && mk.upPct>55){ regimeTxt='顺势偏强'; regimeCls='fw-pill-buy'; } }
+    if(mk){ if(mk.median<0 && mk.upPct<45){ regimeTxt='系统性偏弱·降仓'; regimeCls='fw-pill-sell'; } else if(mk.upPct>=55 && mk.median>0){ regimeTxt='顺势偏强'; regimeCls='fw-pill-buy'; } }
     const marketHtml = mk ? `<div class="fw-market">
       <div class="fm-hd">大盘环境（直接展示，用于校准每只标的的建议）</div>
       <div class="fm-body">
