@@ -145,6 +145,37 @@
       return x;
     }catch(e){ return null; }
   }
+  // 东财 push2delay 要求数字市场前缀(0./1./116.)，alpha 前缀(sz./sh.)一律 rc:102 拒绝
+  function emSecid(ni){
+    if(ni.isHK) return '116.'+ni.code;
+    return (ni.market==='sh'?'1':'0')+'.'+ni.code;
+  }
+  // ETF 折溢价：必须用盘中 IOPV(实时预估净值)计算，不能用 T-1 官方净值(会虚高数个百分点、误报"套利陷阱")
+  // 数据源：腾讯 gtimg 实时报价(脚本注入,无 CORS 限制)。下标 [3]=现价 [77]=折溢价率% [78]=IOPV [81]=最新净值
+  function fetchEtfPremium(code){
+    return new Promise((resolve)=>{
+      try{
+        const gtid=(/^[5-9]/.test(code)?'sh':'sz')+code;
+        const sc=document.createElement('script');
+        const t=setTimeout(()=>{ cleanup(); resolve(null); }, 9000);
+        function cleanup(){ clearTimeout(t); if(sc.parentNode) sc.parentNode.removeChild(sc); }
+        sc.onerror=()=>{ cleanup(); resolve(null); };
+        sc.onload=()=>{ try{
+          const raw=window['v_'+gtid]; cleanup();
+          if(!raw) return resolve(null);
+          const a=raw.split('~');
+          const price=+(a[3]||''), iopv=+(a[78]||''), premField=+(a[77]||'');
+          let premiumPct=null;
+          if(price>0 && iopv>0) premiumPct=+((price/iopv-1)*100).toFixed(2);
+          else if(!isNaN(premField)) premiumPct=+premField.toFixed(2);
+          if(premiumPct==null || isNaN(premiumPct)) return resolve(null);
+          resolve({premiumPct, iopv, price, source:'腾讯gtimg·IOPV口径'});
+        }catch(e){ cleanup(); resolve(null); } };
+        sc.src=`https://qt.gtimg.cn/q=${gtid}`;
+        document.head.appendChild(sc);
+      }catch(e){ resolve(null); }
+    });
+  }
   async function fetchMarketBreadth(){
     const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
     const fields='f2,f3,f6,f12';
@@ -358,7 +389,7 @@
     const isOCF = isFund && !isETF;
     const isStock = !isFund;
     res.asset = isOCF?'场外基金':(isETF?'场内ETF':(ni.isHK?'港股个股':'A股个股'));
-    const priceSecid = isOCF?null:(ni.isHK?'116.'+ni.code:(ni.market+'.'+ni.code));
+    const priceSecid = isOCF?null:emSecid(ni);
     let price=null, flow=null;
     if(priceSecid){
       try{ price=await fetchPrice(priceSecid); }catch(e){}
@@ -387,12 +418,18 @@
     const v=valuationPct(klines,252);
     const ps=priceStructure(klines);
     const sus=sustainSignal(klines);
-    let net5=null,total=null,premium=null;
+    let net5=null,total=null,premium=null,premiumSource='';
     if(fund){
       if(fund.grandTotal){ const g=parseGrandTotal(fund.grandTotal); if(g) net5=g.net5; }
       if(fund.buySed) total=totalShares(fund.buySed);
-      const navY = (fund.netWorthTrend&&fund.netWorthTrend.length)? +fund.netWorthTrend[fund.netWorthTrend.length-1].y : null;
-      if(isETF && navY && price) premium=+((price.price/navY-1)*100).toFixed(2);
+      if(isETF){
+        // 折溢价用盘中 IOPV(腾讯gtimg)，与同花顺/东财口径一致；杜绝用 T-1 净值导致的虚高
+        try{ const ep=await fetchEtfPremium(item.code); if(ep && ep.premiumPct!=null){ premium=+ep.premiumPct.toFixed(2); premiumSource=ep.source; } }catch(e){}
+        if(premium==null){ // 兜底：gtimg 失败时用 现价/T-1净值(标注粗略口径)
+          const navY=(fund.netWorthTrend&&fund.netWorthTrend.length)? +fund.netWorthTrend[fund.netWorthTrend.length-1].y : null;
+          if(navY && price){ premium=+((price.price/navY-1)*100).toFixed(2); premiumSource='东财·T-1净值(粗略)'; }
+        }
+      }
     }
     const chip=chipDistribution(klines,120);
     const div=divergenceSignals(klines);
@@ -403,7 +440,7 @@
     }
     res.layers={
       L2:v, L3:ps, L2b:sus,
-      L4:{isETF,isOCF,net5,total,premium},
+      L4:{isETF,isOCF,net5,total,premium,premiumSource},
       UW:{chip, div, flow:flowOut, sentiment:null}
     };
     res.research = research;
@@ -437,7 +474,7 @@
       else reasons.push('价格结构震荡（均线无明确方向）'); }
     if(L.L2b){ if(L.L2b.sustained){ score+=0.5; reasons.push('上涨结构持续'+L.L2b.days+'日且放量，偏基本面驱动'); } else reasons.push('上涨持续性不足(偏短线脉冲)'); }
     if(L.L4.isETF||L.L4.isOCF){
-      if(L.L4.premium!=null) reasons.push('折溢价'+L.L4.premium.toFixed(2)+'%'+(Math.abs(L.L4.premium)<=3?'(无套利干扰)':'⚠偏离大'));
+      if(L.L4.premium!=null) reasons.push('折溢价'+L.L4.premium.toFixed(2)+'%('+(L.L4.premiumSource||'IOPV口径')+(Math.abs(L.L4.premium)<=3?'·无套利干扰':'·⚠偏离大·套利陷阱风险')+')');
       if(L.L4.net5!=null){
         if(L.L4.net5>=-5){ score+=0.5; reasons.push('近5日净申赎'+L.L4.net5.toFixed(2)+'亿份，一级市场无撤离'); }
         else { score-=0.5; reasons.push('近5日净赎回'+L.L4.net5.toFixed(2)+'亿份，一级市场在撤'); }
@@ -580,7 +617,7 @@
     if(L4.isETF||L4.isOCF){
       const premOk = L4.premium==null||Math.abs(L4.premium)<=3;
       const netOk = L4.net5==null||L4.net5>=-5;
-      items.push({t:'⑤ 一级市场', pass:premOk&&netOk, na:false, reason:`折溢价${L4.premium!=null?L4.premium.toFixed(1)+'%':'—'}·净申赎${L4.net5!=null?L4.net5.toFixed(1)+'亿':'—'}`});
+      items.push({t:'⑤ 一级市场', pass:premOk&&netOk, na:false, reason:`折溢价${L4.premium!=null?L4.premium.toFixed(1)+'%('+(L4.premiumSource||'IOPV')+')':'—'}·净申赎${L4.net5!=null?L4.net5.toFixed(1)+'亿':'—'}`});
     }
     // 个股(非基金)无一级市场维度 → 不计入清单、不影响建议
     return items;
@@ -671,6 +708,7 @@
         <p><b>② 价格结构(持续)</b> 需同时满足三项才打 ✓：① 上涨持续 ≥10 日；② 区间创新高 ≥2 次；③ 放量确认（近段成交量显著高于前段）。任一项不满足即 ✗。<br>例如润泽科技「持续122日·创新高6次·放量⚠」满足前两项，但<b>放量未确认(⚠)</b>，故整体 ✗——提示量价配合不足、需警惕派发，<b>与研报无关</b>。</p>
         <p><b>研报共识</b> 是<b>独立维度</b>（分析师评级统计），不参与 ② 结构判定，仅在卡片徽章与 ② 备注中展示，作为基本面旁证。研报 100% 买入 ≠ 结构必然成立。</p>
         <p><b>大盘环境</b> 由全市场约 5500 只 A 股实时涨跌计算（上涨占比=上涨家数/总数），用于校准每只标的的建议（系统性偏弱时降仓）。</p>
+        <p><b>折溢价(ETF)</b> 用<b>盘中 IOPV（实时预估净值）</b>计算，与同花顺/东财口径一致：溢价% = 现价 ÷ IOPV − 1。正常在 ±3% 内为「无套利干扰」；超过才标 ⚠「套利陷阱风险」。注意：<b>不能用 T-1 官方净值</b>算——板块盘中若大涨，IOPV 跟着涨，相对昨净值的"溢价"会虚高好几分点（例如电网设备ETF华夏曾误显 +5.37%，实为 +0.13%/IOPV）。若显示「东财·T-1净值(粗略)」说明腾讯源未取到，为兜底值，仅供参考。</p>
       </div></details>`;
     sectionEl.innerHTML = `<div class="fw-recap">${summary}${marketHtml}${legendHtml}<div class="fw-cards">${cards}</div>
       <div class="fw-src" style="margin-top:12px">说明：建议为框架综合研判结论（四层+水下层），非个性化投资建议；市场情绪为恐惧贪婪代理。复盘在打开/刷新页面时基于最新可得数据生成；日K线为上一交易日收盘，盘中实时价仅影响现价与资金流。报告仅供参考，不构成个人投资建议。</div></div>`;
