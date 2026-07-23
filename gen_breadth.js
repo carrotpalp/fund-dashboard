@@ -49,7 +49,7 @@ function get(pn, fid) {
   }
   const pct = all.map(x => x.f3).filter(v => typeof v === 'number' && !isNaN(v)).map(v => v / 100).sort((a, b) => a - b);
   const n = pct.length;
-  const median = n % 2 ? (pct[(n - 1) / 2] + pct[(n + 1) / 2]) / 2 : pct[n / 2];
+  const median = n % 2 ? pct[(n - 1) / 2] : (pct[n / 2 - 1] + pct[n / 2]) / 2;
   const up = pct.filter(x => x > 0).length, dn = pct.filter(x => x < 0).length, flat = n - up - dn;
   const totAmt = all.reduce((s, x) => s + (Number(x.f6) || 0), 0);
   const out = {

@@ -623,7 +623,7 @@
     const L4=L.L4;
     const m = global.STATE && global.STATE.market;
     if(m){ const ok=m.median>=0.001 && m.upPct>=45 && m.totAmt>=6000*1e8;
-      items.push({t:'① 大盘环境', pass:ok, na:false, reason:`中位${m.median>=0?'+':''}${m.median.toFixed(2)}%·涨${m.upPct.toFixed(0)}%·成交${(m.totAmt/1e8).toFixed(0)}亿`}); }
+      items.push({t:'① 大盘环境', pass:ok, na:false, reason:`中位${m.median>=0?'+':''}${(m.median*100).toFixed(2)}%·涨${m.upPct.toFixed(0)}%·成交${(m.totAmt/1e8).toFixed(0)}亿`}); }
     else items.push({t:'① 大盘环境', pass:false, na:true, reason:'见顶部全局环境'});
     const s=L.L2b;
     const structOk = s? s.sustained : false;
@@ -722,7 +722,7 @@
     const marketHtml = mk ? `<div class="fw-market">
       <div class="fm-hd">大盘环境（直接展示，用于校准每只标的的建议${mk.snapshotAt?(' · 数据 '+mk.snapshotAt.slice(0,10)):''}）</div>
       <div class="fm-body">
-        <span>中位涨跌幅 <b class="${mk.median>=0?'up':'down'}">${mk.median>=0?'+':''}${mk.median.toFixed(2)}%</b></span>
+        <span>中位涨跌幅 <b class="${mk.median>=0?'up':'down'}">${mk.median>=0?'+':''}${(mk.median*100).toFixed(2)}%</b></span>
         <span>上涨占比 <b>${mk.upPct.toFixed(0)}%</b> <span class="fm-sub">(${mk.up}/${mk.total})</span></span>
         <span>成交额 <b>${(mk.totAmt/1e8).toFixed(0)}亿</b></span>
         ${sent?`<span>情绪 <b>${sent.label}(${sent.score})</b></span>`:''}

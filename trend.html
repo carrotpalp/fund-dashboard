@@ -485,7 +485,7 @@ function renderL1(code){
       : '中位数偏弱 / 涨少跌多 / 成交低迷 → 系统性风险偏大，宜控仓、只做最强结构。';
     mb=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
       <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">大盘赚钱效应（自动 · 全市场${m.total}只 · <span class="src">${m.source}${m.snapshotAt?(' · '+m.snapshotAt.slice(0,10)):''}${m.fresh===false?' · 偏旧':''}</span>）</div>
-      <div class="kv"><span class="k">涨跌中位数</span><span class="v" style="color:${m.median>=0?'var(--up)':'var(--down)'}">${m.median>=0?'+':''}${m.median.toFixed(2)}%</span></div>
+      <div class="kv"><span class="k">涨跌中位数</span><span class="v" style="color:${m.median>=0?'var(--up)':'var(--down)'}">${m.median>=0?'+':''}${(m.median*100).toFixed(2)}%</span></div>
       <div class="kv"><span class="k">上涨家数占比</span><span class="v">${m.upPct.toFixed(1)}%（${m.up}涨 / ${m.dn}跌）</span></div>
       <div class="kv"><span class="k">两市成交额</span><span class="v">${(m.totAmt/1e8).toFixed(0)}亿</span></div>
       <div class="kv"><span class="k">判定</span><span class="v" style="color:${col}">${verdict}</span></div>
@@ -963,8 +963,8 @@ function buildChecks(){
   const C=[];
   // —— ① 大盘环境（所有资产通用，背景项）——
   C.push({ id:1, title:'① 大盘环境友好（赚钱效应达标）', src:'自动·全市场涨跌中位数+上涨占比+成交额',
-    judge:()=>{ if(!m) return 'manual'; return m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8; },
-    evi:()=>{ if(!m) return null; return `中位 ${m.median>=0?'+':''}${m.median.toFixed(2)}% · 涨${m.upPct.toFixed(0)}%(${m.up}/${m.dn}) · 成交 ${(m.totAmt/1e8).toFixed(0)}亿`; },
+    judge:()=>{ if(!m) return 'manual'; return m.median>=0.001 && m.upPct>=45 && m.totAmt>=6000*1e8; },
+    evi:()=>{ if(!m) return null; return `中位 ${m.median>=0?'+':''}${(m.median*100).toFixed(2)}% · 涨${m.upPct.toFixed(0)}%(${m.up}/${m.dn}) · 成交 ${(m.totAmt/1e8).toFixed(0)}亿`; },
     pass:'系统性友好，可放宽选股', fail:'系统性偏弱，控仓、只做最强结构',
     guide:'东方财富/同花顺看「上涨家数占比≥45%」+「个股涨跌中位数≥+0.1%」+「全市场成交额≥6000亿」→ 满足则大盘环境友好，可勾。' });
 
