@@ -281,10 +281,12 @@
     const days=n-1-lowIdx;
     const seg=klines.slice(lowIdx);
     const pv=pivots(seg,5);
-    const hh=pv.highs.length;
+    // 有成交量(个股/ETF)：用局部峰数创新高；无量(基金净值单值曲线)：用"创区间新高次数"更稳健(平滑上行也能数出)
+    const hh = vols.some(v=>v>0) ? pv.highs.length : (()=>{ let rm=seg[0].close, c=0; for(const k of seg){ if(k.close>rm){ rm=k.close; c++; } } return c; })();
     const half=Math.max(1,Math.floor(days/2));
     const recentVol=avg(vols.slice(n-half)), prevVol=avg(vols.slice(lowIdx, n-half));
-    const volUp= prevVol>0 && recentVol>prevVol*1.05;
+    const hasVol = vols.some(v=>v>0);            // 基金净值序列 vol 恒为 0 → 无成交量概念，不要求放量
+    const volUp = !hasVol ? true : (prevVol>0 && recentVol>prevVol*1.05);
     const sustained = days>=10 && hh>=2 && volUp;
     return {days, hh, volUp, sustained};
   }
@@ -595,29 +597,31 @@
   // 复盘卡片用的逐项 5 步清单：返回 [{t, pass, na, reason}]，pass/fail 与趋势工具 CHECKS 逻辑一致
   function fwChecklist(r){
     const L=r.layers, items=[];
+    const L4=L.L4;
     const m = global.STATE && global.STATE.market;
     if(m){ const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
       items.push({t:'① 大盘环境', pass:ok, na:false, reason:`中位${m.median>=0?'+':''}${m.median.toFixed(2)}%·涨${m.upPct.toFixed(0)}%·成交${(m.totAmt/1e8).toFixed(0)}亿`}); }
     else items.push({t:'① 大盘环境', pass:false, na:true, reason:'见顶部全局环境'});
-    const s=L.L2b; const structOk = s? s.sustained : false;
+    const s=L.L2b;
+    const structOk = s? s.sustained : false;
     const volMark = (s&&s.volUp)?'✅':'⚠';
     const daysTxt = s? s.days : 0;
     const hhTxt = s? s.hh : 0;
-    // ② 实为「价格结构(持续)」判定：需同时满足 持续≥10日 + 创新高≥2次 + 放量确认；研报是独立维度，不决定此项
+    // ② 实为「价格结构(持续)」判定：持续≥10日 + 创新高≥2次 + 放量确认(基金净值无成交量→放宽)
     let rsTxt = '持续'+daysTxt+'日·创新高'+hhTxt+'次·放量'+volMark;
     rsTxt += structOk ? '：结构持续成立(偏基本面驱动)' : '：放量未确认⚠→结构未确认';
     if(r && r.research && r.research.count>0){ rsTxt += '；研报共识 '+r.research.count+'篇·'+r.research.bullPct+'%买入/增持'; }
     else { rsTxt += (r && (r.asset==='场内ETF'||r.asset==='场外基金')) ? '；研报 无（ETF/基金无个股研报）' : '；研报 无覆盖'; }
-    items.push({t:'② 价格结构(持续)', pass:structOk, na:false, reason:rsTxt});
+    items.push({t:'② 价格结构(持续)', pass:structOk, na:!s, reason:rsTxt});
     const pct=L.L2?L.L2.pct:null;
-    items.push({t:'③ 估值不贵', pass: pct!=null && pct<75, na:false, reason: pct!=null?`分位${pct.toFixed(0)}%`:'—'});
+    items.push({t:'③ 估值不贵', pass: pct!=null && pct<75, na: pct==null, reason: pct!=null?`分位${pct.toFixed(0)}%`:'数据不足'});
     const st=L.L3; const ok4 = st? (st.trend==='uptrend'||(st.trend==='mixed'&&st.maBull)) : false;
-    items.push({t:'④ 价格趋势', pass:ok4, na:false, reason: st?({uptrend:'上升',downtrend:'下降',mixed:'震荡'})[st.trend]+(st.maBull?'·均多':'')+(st.maBear?'·均空':'') :'—'});
-    const L4=L.L4;
+    items.push({t:'④ 价格趋势', pass:ok4, na:!st, reason: st?({uptrend:'上升',downtrend:'下降',mixed:'震荡'})[st.trend]+(st.maBull?'·均多':'')+(st.maBear?'·均空':'') :'数据不足'});
     if(L4.isETF||L4.isOCF){
       const premOk = L4.premium==null||Math.abs(L4.premium)<=3;
       const netOk = L4.net5==null||L4.net5>=-5;
-      items.push({t:'⑤ 一级市场', pass:premOk&&netOk, na:false, reason:`折溢价${L4.premium!=null?L4.premium.toFixed(1)+'%('+(L4.premiumSource||'IOPV')+')':'—'}·净申赎${L4.net5!=null?L4.net5.toFixed(1)+'亿':'—'}`});
+      const bothNa = L4.premium==null && L4.net5==null;  // 两项都取不到才标"待数据"，否则按取到项判定
+      items.push({t:'⑤ 一级市场', pass:premOk&&netOk, na:bothNa, reason:`折溢价${L4.premium!=null?L4.premium.toFixed(1)+'%('+(L4.premiumSource||'IOPV')+')':'—'}·净申赎${L4.net5!=null?L4.net5.toFixed(1)+'亿':'—'}`});
     }
     // 个股(非基金)无一级市场维度 → 不计入清单、不影响建议
     return items;

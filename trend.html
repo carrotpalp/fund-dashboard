@@ -498,7 +498,7 @@ function renderL1(code){
 }
 
 /* ============ 主流程 ============ */
-let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, market:null, l1checks:[false,false,false], hasK:false, _struc:null, asset:'', srcInfo:''};
+let STATE={klines:null, fund:null, price:null, netFlow:null, totalShares:null, market:null, l1checks:[false,false,false], hasK:false, _struc:null, asset:'', srcInfo:'', _prem:null, _premSrc:''};
 
 function parseShares(text){
   const out=[];
@@ -546,6 +546,8 @@ async function analyze(){
   }
   try{ STATE.market=await fetchMarketBreadth(); }catch(e){ STATE.market=null; }
   STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.quoteFlow=quoteFlow; STATE.mainForce=mainForce; STATE.research=research; STATE.hasK=!!klines; STATE.srcInfo=srcInfo;
+  // ETF 折溢价用盘中 IOPV（腾讯gtimg），修正此前「现价÷T-1净值」虚高 bug（曾误显 +5.37%）
+  if(isETF){ try{ const ep=await fetchEtfPremiumGT(ni.code); if(ep&&ep.premiumPct!=null){ STATE._prem=ep.premiumPct; STATE._premSrc=ep.source; } }catch(e){} }
   STATE.l1checks=renderL1(code);
   document.getElementById('rag').innerHTML='';
   document.getElementById('verdict').innerHTML='分析完成';
@@ -756,22 +758,26 @@ function renderL4(klines, fund, price){
   html+=`<div id="netflowchart" style="margin-top:8px">${renderNetFlow(daily)}</div>`;
   body.innerHTML=html;
 
-  // 折溢价（实时）
+  // 折溢价：优先用盘中 IOPV（STATE._prem 已在 analyze 经 gtimg 取得），否则 T-1 净值兜底(标粗略)
   const nav=(fund&&fund.netWorthTrend&&fund.netWorthTrend.length)? +fund.netWorthTrend[fund.netWorthTrend.length-1].y : null;
   const px=price?price.price:(klines&&klines.length?klines[klines.length-1].close:null);
-  let prem=null, premHtml='';
-  if(nav&&nav>0&&px!=null){
-    prem=(px-nav)/nav*100;
+  let premHtml='';
+  if(STATE._prem!=null){
+    const prem=STATE._prem;
     const col=Math.abs(prem)>3?'var(--red)':(Math.abs(prem)>1?'var(--amber)':'var(--green)');
     const lab=Math.abs(prem)>3?'高溢价·套利陷阱风险':(Math.abs(prem)>1?'溢价偏大':'正常区间');
-    premHtml=`<div class="kv"><span class="k">单位净值(官方)</span><span class="v">${nav.toFixed(4)}</span></div>
-      <div class="kv"><span class="k">现价</span><span class="v">${px.toFixed(3)}</span></div>
-      <div class="kv"><span class="k">折溢价</span><span class="v" style="color:${col}">${prem>=0?'+':''}${prem.toFixed(2)}% · ${lab}</span></div>`;
+    const src=STATE._premSrc||'';
+    premHtml=`<div class="kv"><span class="k">折溢价</span><span class="v" style="color:${col}">${prem>=0?'+':''}${prem.toFixed(2)}% · ${lab}${src?' · '+src:''}</span></div>`;
+  }else if(nav&&nav>0&&px!=null){
+    const prem=(px-nav)/nav*100;
+    const col=Math.abs(prem)>3?'var(--red)':'var(--amber)';
+    premHtml=`<div class="kv"><span class="k">折溢价(粗略)</span><span class="v" style="color:${col}">${prem>=0?'+':''}${prem.toFixed(2)}% · ⚠T-1净值兜底</span></div>`;
+    STATE._prem=prem; STATE._premSrc='东财·T-1净值(粗略)';
   }else{
-    premHtml=`<p class="src">净值获取失败，折溢价不可用。</p>`;
+    premHtml=`<p class="src">现价/净值获取失败，折溢价不可用。</p>`;
+    STATE._prem=null;
   }
-  document.getElementById('l4premium').innerHTML=`<div style="font-size:12px;color:var(--txt2);margin-bottom:4px">实时折溢价（套利陷阱监测）</div>${premHtml}`;
-  STATE._prem=prem;
+  document.getElementById('l4premium').innerHTML=`<div style="font-size:12px;color:var(--txt2);margin-bottom:4px">实时折溢价（套利陷阱监测 · IOPV口径）</div>${premHtml}`;
   document.getElementById('l4src').innerHTML=`<b>数据源（全自动）</b>：当前总份额＝pingzhongdata「总份额」季报；近5日净申赎 / 净流图＝pingzhongdata 份额变动累计序列自动差分；折溢价＝现价(push2delay)÷单位净值−1（实时）。<b>无需手动粘贴</b>；如需覆盖，编辑上方文本框点「应用份额序列」。`;
 }
 
@@ -846,196 +852,213 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
   vb.innerHTML=`综合结论：<span style="color:${reds>0&&L3!=='green'?'var(--red)':greens>=3?'var(--green)':'var(--amber)'}">${v}</span><div class="sub">${sub}</div>`;
 }
 
-/* ---- 5步复盘清单 ---- */
-/* 语义约定：勾选 = 该项通过（绿灯，可动手）；未勾 = 不通过（红灯，回避）。
-   系统已按实时数据自动判定每项勾选/不勾；仅当数据真取不到时才给出手动校验指引。 */
-const CHECKS=[
-  {
-    t:'① 大盘赚钱效应达标：上涨家数占比≥45% 且 涨跌中位数≥+0.1% 且 成交额≥6000亿',
-    n:'自动取：全市场涨跌中位数 + 上涨家数占比 + 总成交额(push2delay)',
-    // 返回 true(勾) / false(不勾) / 'manual'(需手动)
-    judge:()=>{
-      const m=STATE.market;
-      if(!m) return 'manual';
-      const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
-      return ok;
-    },
-    evi:()=>{
-      const m=STATE.market;
-      if(!m) return null;
-      return `中位 ${m.median>=0?'+':''}${m.median.toFixed(2)}% · 涨${m.up}/${m.down}（${m.upPct.toFixed(0)}%）· 成交 ${(m.totAmt/1e8).toFixed(0)}亿 · <span class="src">${m.source}</span>`;
-    }
-  },
-  {
-    t:'② 赛道基本面边际改善：价格结构持续抬升（持续≥10日+创新高≥2次+放量），非纯消息脉冲',
-    n:'数据驱动：价格结构持续性(持续天数/创新高/量能) — 自动判定，无需手动',
-    judge:()=>{
-      if(!STATE.klines) return 'manual';
-      const s=sustainSignal(STATE.klines);
-      return s.sustained;   // 纯结构判定：持续≥10日 且 创新高≥2次 且 放量
-    },
-    evi:()=>{
-      if(!STATE.klines) return null;
-      const s=sustainSignal(STATE.klines);
-      const ok=s.sustained;
-      let txt=`结构持续 ${s.days}交易日(${ok?'≥10✓':'<10✗'})·创新高${s.hh}次(${s.hh>=2?'≥2✓':'<2✗'})·量能${s.volUp?'放大✅':'未放大⚠'} → ${ok?'满足「持续抬升」':'不满足'}`;
-      txt += ` → 综合：${ok?'✓ 通过(可勾)':'✗ 未通过(不勾)'}(价格结构为必要条件，偏基本面驱动而非单日脉冲)`;
-      txt += '。';
-      if(STATE.research && STATE.research.count>0){
-        txt += `研报佐证：近${STATE.research.count}篇（${STATE.research.bullPct}%买入/增持）`;
-        if(STATE.research.last) txt += `，最新：${STATE.research.last.org}《${STATE.research.last.title}》(${STATE.research.last.date})`;
-      } else {
-        txt += '研报佐证：近120日东财 reportapi 按个股查询无覆盖（或接口临时失败）';
-      }
-      return txt;
-    }
-  },
-  {
-    t:'③ 估值不贵：价格分位<75%（对应 PE/PB 5年分位<75%）',
-    n:'对应 L2 价格分位（>75% 偏贵 · <35% 偏便宜）',
-    judge:()=>{
-      if(!STATE.klines) return 'manual';
-      const closes=STATE.klines.map(k=>k.close);
-      const win=Math.min(252,closes.length);
-      const sl=closes.slice(closes.length-win);
-      const lo=Math.min(...sl), hi=Math.max(...sl);
-      const pct=hi===lo?50:(closes[closes.length-1]-lo)/(hi-lo)*100;
-      return pct<75;
-    },
-    evi:()=>{
-      if(!STATE.klines) return null;
-      const closes=STATE.klines.map(k=>k.close);
-      const win=Math.min(252,closes.length);
-      const sl=closes.slice(closes.length-win);
-      const lo=Math.min(...sl), hi=Math.max(...sl);
-      const pct=hi===lo?50:(closes[closes.length-1]-lo)/(hi-lo)*100;
-      const tag=pct<35?'低位':pct<75?'中位':'高位';
-      return `价格分位 ${pct.toFixed(0)}% · ${tag}（区间 ${lo.toFixed(2)}-${hi.toFixed(2)}）`;
-    }
-  },
-  {
-    t:'④ 价格已走出下跌趋势：高低点抬高（HH-HL）且 均线多头排列（收盘价>MA20>MA60）',
-    n:'对应 L3 结构/HH-HL（含均线多头排列）',
-    judge:()=>{
-      if(!STATE.klines||!STATE._struc) return 'manual';
-      const closes=STATE.klines.map(k=>k.close);
-      const ma20=MA(closes,20), ma60=MA(closes,60);
-      const n=closes.length;
-      const maAligned=closes[n-1]>ma20[n-1]&&ma20[n-1]>ma60[n-1];
-      return STATE._struc==='uptrend' || (STATE._struc==='mixed' && maAligned);
-    },
-    evi:()=>{
-      if(!STATE.klines||!STATE._struc) return null;
-      const closes=STATE.klines.map(k=>k.close);
-      const ma20=MA(closes,20), ma60=MA(closes,60);
-      const n=closes.length;
-      const maAligned=closes[n-1]>ma20[n-1]&&ma20[n-1]>ma60[n-1];
-      const tag=STATE._struc==='uptrend'?'上升':STATE._struc==='downtrend'?'下降':'震荡';
-      return `结构 ${tag} · 均线${maAligned?'多头排列':'非多头'} · 收盘 ${closes[n-1].toFixed(3)}`;
-    }
-  },
-  {
-    t:'⑤ 一级市场无套利干扰：折溢价|x|≤3% 且 近5日净申赎≥-5亿份',
-    n:'对应 L4（折溢价 |x|≤3% 且 近5日净申赎≥-5亿）',
-    judge:()=>{
-      const a=STATE.asset;
-      if(a==='A股个股'||a==='港股个股') return 'na';        // 个股无一级市场资金维度
-      if(a==='场外基金'){                                      // 场外基金无折溢价概念，只看净申赎
-        const net=STATE._net5;
-        return (net!=null) ? (net>=-5) : 'manual';
-      }
-      if(STATE._prem==null) return 'manual';
-      const premOk=Math.abs(STATE._prem)<=3;
-      const net=STATE._net5;
-      const netOk = (net!=null) ? (net>=-5) : true;
-      return premOk && netOk;
-    },
-    evi:()=>{
-      const prem=STATE._prem;
-      const net=STATE._net5;
-      const parts=[];
-      if(prem!=null) parts.push(`折溢价 ${prem>=0?'+':''}${prem.toFixed(2)}%`);
-      if(net!=null) parts.push(`5日净申赎 ${net>=0?'+':''}${net.toFixed(2)}亿份`);
-      if(!parts.length) return null;
-      const premOk=prem==null||Math.abs(prem)<=3;
-      const netOk=net==null||net>=-5;
-      parts.push(premOk&&netOk?'✓':'⚠ 套利/赎回风险');
-      return parts.join(' · ');
-    }
-  },
-];
+/* ============ 极简实战复盘清单（按资产类型区分维度 · 数据缺失不误判为失败） ============
+ * 设计原则（回应"维度科学吗 / 数据拿不到怎么办 / 股票ETF基金能一样吗 / 小白怎么操作"）：
+ *   1. 维度科学：紧扣四层框架（L1方向·L2赔率·L3趋势本体·L4资金验证），每条可量化、可证伪。
+ *   2. 按资产区分：个股看"主力资金流/机构参与"；ETF看"折溢价+份额净申赎"；场外基金看"净值趋势+份额"(无成交量/无折溢价)。
+ *   3. 诚实 NA：数据暂未取到='manual'(中性，不计入缺口)；该资产本无此维度='na'(不展示)。
+ *      —— 绝不允许"没取到数据"被显示成"✗未通过"（这正是之前"每次都未通过"的根因）。
+ *   4. 直接操作：每条给出"通过→怎么做 / 未通过→怎么做"的具体指引，小白看完就知道下一步。 */
 
-/* 当某项无法自动判定时，给出明确的「如何校验」步骤（代替无用的"需你自判"） */
-const GUIDES=[
-  '打开东方财富/同花顺「涨跌家数」看「上涨家数占比」+ 全市场成交额。判定：上涨占比≥45% 且 个股涨幅中位数≥+0.1% 且 成交额≥6000亿 → 勾（系统性环境友好）；否则不勾。',
-  '①看近20日K线是否持续抬升、连续创新高≥2次且放量（结构持续性）；②搜产业新闻确认订单/capex/政策边际（结构持续需有基本面支撑，而非单日脉冲消息）。判定：结构持续抬升+有基本面催化 → 勾；纯单日脉冲消息、无量空涨 → 不勾。',
-  '东方财富/中证指数官网查该指数「PE/PB 5年历史分位」。判定：分位<75%（不贵）→ 勾；>75%（高位警惕）→ 不勾。若仅看价格，当前价处于近52周低位/高位同理。',
-  '看K线——最近一个低点是否高于前一个低点(HL)、最近一个高点是否高于前一个高点(HH)；且收盘价站上MA20并MA20>MA60（均线多头）。判定：结构上升或震荡+均线多头 → 勾；明确下降(高低点下移) → 不勾。',
-  '集思录/东方财富查该ETF「场内折溢价」与基金公告「份额变动」。判定：折溢价|x|≤3% 且 近5日净申赎≥-5亿份 → 勾；溢价>3%（多为套利盘主导，反弹可信度低）或大幅净赎回 → 不勾。'
-];
+// 基金净值版"结构持续"：净值无成交量概念，不要求放量，改用 净值创新高 + 站上均线
+function sustainNav(klines){
+  const n=klines.length;
+  if(n<20) return {days:0, hh:0, maBull:false, sustained:false};
+  const closes=klines.map(k=>k.close);
+  let lowIdx=n-1;
+  for(let i=n-1;i>=0;i--){ if(closes[i] < closes[n-1]*0.92){ lowIdx=i+1; break; } }
+  const days=n-1-lowIdx;
+  const seg=klines.slice(lowIdx);
+  const pv=pivots(seg,5);
+  // 净值单值曲线用"创区间新高次数"更稳健(平滑上行也能数出创新高)；有成交量序列才用局部峰
+  const hh = seg.some(k=>k.vol>0) ? pv.highs.length : (()=>{ let rm=seg[0].close, c=0; for(const k of seg){ if(k.close>rm){ rm=k.close; c++; } } return c; })();
+  const ma5=MA(closes,5), ma10=MA(closes,10), ma20=MA(closes,20), ma60=MA(closes,60);
+  const i=n-1;
+  const maBull = ma5[i]>ma20[i] && ma20[i]>ma60[i] && ma10[i]>ma20[i];
+  const sustained = days>=15 && hh>=2 && maBull;
+  return {days, hh, maBull, sustained};
+}
+// 近 N 日最大回撤（%）：用于场外基金风险维度
+function maxDrawdown(klines){
+  if(!klines||klines.length<2) return null;
+  const cs=klines.map(k=>k.close); const N=Math.min(20,cs.length);
+  const seg=cs.slice(cs.length-N); let peak=seg[0], mdd=0;
+  for(const v of seg){ if(v>peak) peak=v; const dd=(peak-v)/peak*100; if(dd>mdd) mdd=dd; }
+  return +mdd.toFixed(1);
+}
+// 价格分位（近252交易日）
+function pricePct(klines){
+  const closes=klines.map(k=>k.close);
+  const win=Math.min(252,closes.length);
+  const sl=closes.slice(closes.length-win);
+  const lo=Math.min(...sl), hi=Math.max(...sl);
+  const pct=hi===lo?50:(closes[closes.length-1]-lo)/(hi-lo)*100;
+  return {pct, lo, hi, tag: pct<35?'低位':pct<75?'中位':'高位'};
+}
+// ETF 折溢价：用盘中 IOPV（腾讯gtimg [78]），杜绝 T-1 净值导致的虚高（曾误显 +5.37%）
+function fetchEtfPremiumGT(code){
+  return new Promise((resolve)=>{
+    try{
+      const gtid=(/^[5-9]/.test(code)?'sh':'sz')+code;
+      const sc=document.createElement('script');
+      const t=setTimeout(()=>{ cleanup(); resolve(null); },9000);
+      function cleanup(){ clearTimeout(t); if(sc.parentNode) sc.parentNode.removeChild(sc); }
+      sc.onerror=()=>{ cleanup(); resolve(null); };
+      sc.onload=()=>{ try{
+        const raw=window['v_'+gtid]; cleanup();
+        if(!raw) return resolve(null);
+        const a=raw.split('~');
+        const price=+(a[3]||''), iopv=+(a[78]||''), premField=+(a[77]||'');
+        let pct=null;
+        if(price>0 && iopv>0) pct=+((price/iopv-1)*100).toFixed(2);
+        else if(!isNaN(premField)) pct=+premField.toFixed(2);
+        if(pct==null||isNaN(pct)) return resolve(null);
+        resolve({premiumPct:pct, iopv, price, source:'腾讯gtimg·IOPV口径'});
+      }catch(e){ cleanup(); resolve(null); } };
+      sc.src=`https://qt.gtimg.cn/q=${gtid}`;
+      document.head.appendChild(sc);
+    }catch(e){ resolve(null); }
+  });
+}
 
+// 按资产类型生成 5 维清单
+function buildChecks(){
+  const a=STATE.asset, m=STATE.market, k=STATE.klines;
+  const isStock = a==='A股个股'||a==='港股个股';
+  const isETF = a==='场内ETF', isOCF = a==='场外基金';
+  const C=[];
+  // —— ① 大盘环境（所有资产通用，背景项）——
+  C.push({ id:1, title:'① 大盘环境友好（赚钱效应达标）', src:'自动·全市场涨跌中位数+上涨占比+成交额',
+    judge:()=>{ if(!m) return 'manual'; return m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8; },
+    evi:()=>{ if(!m) return null; return `中位 ${m.median>=0?'+':''}${m.median.toFixed(2)}% · 涨${m.upPct.toFixed(0)}%(${m.up}/${m.dn}) · 成交 ${(m.totAmt/1e8).toFixed(0)}亿`; },
+    pass:'系统性友好，可放宽选股', fail:'系统性偏弱，控仓、只做最强结构',
+    guide:'东方财富/同花顺看「上涨家数占比≥45%」+「个股涨跌中位数≥+0.1%」+「全市场成交额≥6000亿」→ 满足则大盘环境友好，可勾。' });
+
+  if(isStock){
+    C.push({ id:2, title:'② 估值不贵（价格分位<75%）', src:'对应 L2 赔率(近52周价格分位，代理PE/PB)',
+      judge:()=>{ if(!k) return 'manual'; return pricePct(k).pct<75; },
+      evi:()=>{ if(!k) return null; const p=pricePct(k); return `价格分位 ${p.pct.toFixed(0)}% · ${p.tag}（区间 ${p.lo.toFixed(2)}-${p.hi.toFixed(2)}）`; },
+      pass:'赔率好，下跌空间有限', fail:'处历史高位，警惕利好兑现、不追高',
+      guide:'东方财富/中证指数官网查该指数「PE/PB 5年历史分位」。分位<75%(不贵)→勾；>75%(高位)→不勾。仅看价格时，当前价处近52周低位/高位同理。' });
+    C.push({ id:3, title:'③ 价格趋势向上（高低点抬高+均线多头）', src:'对应 L3 趋势本体(第一优先级)',
+      judge:()=>{ if(!k||!STATE._struc) return 'manual'; const c=k.map(x=>x.close); const ma20=MA(c,20),ma60=MA(c,60); const i=c.length-1; const maAligned=c[i]>ma20[i]&&ma20[i]>ma60[i]; return STATE._struc==='uptrend'||(STATE._struc==='mixed'&&maAligned); },
+      evi:()=>{ if(!k||!STATE._struc) return null; const c=k.map(x=>x.close); const ma20=MA(c,20),ma60=MA(c,60); const i=c.length-1; const maAligned=c[i]>ma20[i]&&ma20[i]>ma60[i]; const tag=STATE._struc==='uptrend'?'上升':STATE._struc==='downtrend'?'下降':'震荡'; return `结构 ${tag} · 均线${maAligned?'多头':'非多头'} · 收盘 ${c[i].toFixed(3)}`; },
+      pass:'趋势确认，顺势参与', fail:'仍在下跌/震荡，绝不左侧抄底',
+      guide:'看K线：最近低点是否高于前一个低点(HL)、最近高点是否高于前一个高点(HH)；且收盘价站上MA20、MA20>MA60(均线多头)。结构上升或震荡+均线多头→勾；明确下降(高低点下移)→不勾。' });
+    const f=STATE.mainForce;
+    C.push({ id:4, title:'④ 主力资金流入（净流入+机构参与）', src:'东财 RPT_DMSK_TS_STOCKNEW（个股最权威资金维度）',
+      judge:()=>{ if(!f||f.na) return 'manual'; return f.netY>0 && (f.orgParticipate==null||f.orgParticipate>0.35); },
+      evi:()=>{ if(!f||f.na) return null; return `主力净流入 ${f.netY}亿 · 机构参与${f.orgParticipate!=null?(f.orgParticipate*100).toFixed(0)+'%':'—'} · 主力成本 ${f.primeCost!=null?f.primeCost:'—'}${f.priceVsCost!=null?' · 现价/成本'+((f.priceVsCost*100)>=0?'+':'')+(f.priceVsCost*100).toFixed(1)+'%':''}`; },
+      pass:'资金在场，验证偏多', fail:'主力在撤/参与度低，警惕派发',
+      guide:'东方财富/同花顺个股页看「主力净流入」「机构参与度」。净流入且机构参与>35%→勾；净流出或参与度<35%→不勾。' });
+    C.push({ id:5, title:'⑤ 上涨结构健康（持续抬升+无顶背离）', src:'价格结构持续性 + 量价背离',
+      judge:()=>{ if(!k) return 'manual'; const s=sustainSignal(k); const div=window.FW?FW.divergenceSignals(k):null; const topDiv=div?div.topDiv:false; return s.sustained && !topDiv; },
+      evi:()=>{ if(!k) return null; const s=sustainSignal(k); const div=window.FW?FW.divergenceSignals(k):null; const topDiv=div?div.topDiv:false; const ok=s.sustained&&!topDiv; return `结构持续 ${s.days}日(${s.days>=10?'≥10✓':'<10'})·创新高${s.hh}次(${s.hh>=2?'≥2✓':'<2'})·放量${s.volUp?'✅':'⚠'}${topDiv?' · ⚠顶背离':''} → ${ok?'✓健康':'✗需警惕'}`; },
+      pass:'量价配合健康，可持有/加', fail:'放量未确认或顶背离，防派发减仓',
+      guide:'看近20日K线是否持续抬升、创新高≥2次且放量；同时看有无"价创新高但MACD不创新高"的顶背离。结构健康→勾；顶背离/无量空涨→不勾。' });
+  }
+  else if(isETF){
+    C.push({ id:2, title:'② 价格趋势向上（ETF本身K线结构）', src:'对应 L3 趋势本体',
+      judge:()=>{ if(!k||!STATE._struc) return 'manual'; const c=k.map(x=>x.close); const ma20=MA(c,20),ma60=MA(c,60); const i=c.length-1; const maAligned=c[i]>ma20[i]&&ma20[i]>ma60[i]; return STATE._struc==='uptrend'||(STATE._struc==='mixed'&&maAligned); },
+      evi:()=>{ if(!k||!STATE._struc) return null; const c=k.map(x=>x.close); const ma20=MA(c,20),ma60=MA(c,60); const i=c.length-1; const maAligned=c[i]>ma20[i]&&ma20[i]>ma60[i]; const tag=STATE._struc==='uptrend'?'上升':STATE._struc==='downtrend'?'下降':'震荡'; return `结构 ${tag} · 均线${maAligned?'多头':'非多头'}`; },
+      pass:'趋势确认，顺势', fail:'仍在下跌/震荡',
+      guide:'同个股③：看ETF自身K线高低点结构+均线多头。上升或震荡+均线多头→勾；明确下降→不勾。' });
+    C.push({ id:3, title:'③ 折溢价正常（|x|≤3%，无套利陷阱）', src:'腾讯gtimg IOPV口径(实时预估净值)',
+      judge:()=>{ if(STATE._prem==null) return 'manual'; return Math.abs(STATE._prem)<=3; },
+      evi:()=>{ if(STATE._prem==null) return null; return `折溢价 ${STATE._prem>=0?'+':''}${STATE._prem.toFixed(2)}%${Math.abs(STATE._prem)<=3?' · 正常区间':' · ⚠高溢价·套利陷阱'}${STATE._premSrc?' · '+STATE._premSrc:''}`; },
+      pass:'无套利干扰，价格真实', fail:'高溢价，套利盘主导，反弹可信度低',
+      guide:'集思录/东方财富查该ETF「场内折溢价」。|x|≤3%→勾；>3%(多为套利盘，随时兑现)→不勾，别把高溢价当"资金看好"。' });
+    const net=STATE._net5;
+    C.push({ id:4, title:'④ 份额净申购（近5日净申赎≥0）', src:'pingzhongdata 份额变动(一级市场资金验证)',
+      judge:()=>{ if(net==null) return 'manual'; return net>=-2; },
+      evi:()=>{ if(net==null) return null; return `近5日净申赎 ${net>=0?'+':''}${net.toFixed(2)}亿份${net>=0?' · 资金流入✅':' · 资金流出⚠'}`; },
+      pass:'资金在进，验证偏多', fail:'资金在撤，降仓',
+      guide:'基金公告/集思录查「份额变动」：近5日净申赎≥0(资金流入)→勾；大幅净赎回→不勾。' });
+    C.push({ id:5, title:'⑤ 估值/赛道不贵（价格分位<75%）', src:'对应 L2 赔率',
+      judge:()=>{ if(!k) return 'manual'; return pricePct(k).pct<75; },
+      evi:()=>{ if(!k) return null; const p=pricePct(k); return `价格分位 ${p.pct.toFixed(0)}% · ${p.tag}`; },
+      pass:'赔率好', fail:'高位警惕',
+      guide:'查跟踪指数「PE/PB 5年分位」<75%→勾；>75%→不勾。' });
+  }
+  else if(isOCF){
+    C.push({ id:2, title:'② 净值趋势向上（净值创新高+站上均线）', src:'净值历史(无成交量概念，不要求放量)',
+      judge:()=>{ if(!k) return 'manual'; return sustainNav(k).sustained; },
+      evi:()=>{ if(!k) return null; const sn=sustainNav(k); return `净值持续 ${sn.days}日(${sn.days>=15?'≥15✓':'<15'})·创新高${sn.hh}次(${sn.hh>=2?'≥2✓':'<2'})·均线${sn.maBull?'多头✅':'非多头'} → ${sn.sustained?'✓抬升':'✗未确认'}`; },
+      pass:'净值趋势向上，可定投/持有', fail:'净值未走出上升结构',
+      guide:'看基金净值曲线(天天基金/东财)：近3月净值是否创新高≥2次且站上均线。是→勾；横盘/下行→不勾。(基金无成交量，不看放量)' });
+    C.push({ id:3, title:'③ 业绩分位合理（近1年净值分位<75%）', src:'对应 L2 赔率',
+      judge:()=>{ if(!k) return 'manual'; return pricePct(k).pct<75; },
+      evi:()=>{ if(!k) return null; const p=pricePct(k); return `净值分位 ${p.pct.toFixed(0)}% · ${p.tag}`; },
+      pass:'不贵', fail:'高位警惕',
+      guide:'对比同类基金近1年收益分位：处于前25%以内(贵)→不勾；中等/偏低→勾。' });
+    const net=STATE._net5;
+    C.push({ id:4, title:'④ 份额稳定/增长（近5日净申赎≥-5亿）', src:'pingzhongdata 份额变动',
+      judge:()=>{ if(net==null) return 'manual'; return net>=-5; },
+      evi:()=>{ if(net==null) return null; return `近5日净申赎 ${net>=0?'+':''}${net.toFixed(2)}亿份${net>=0?' · 资金流入✅':' · 小幅流出⚠'}`; },
+      pass:'资金没撤', fail:'大幅净赎回，警惕',
+      guide:'基金公告查「份额变动」：近5日净申赎≥-5亿(没大撤)→勾；大幅净赎回→不勾。' });
+    C.push({ id:5, title:'⑤ 回撤可控（近20日最大回撤<15%）', src:'净值序列回撤(风险维度)',
+      judge:()=>{ if(!k) return 'manual'; const d=maxDrawdown(k); return d!=null && d<15; },
+      evi:()=>{ if(!k) return null; const d=maxDrawdown(k); return `近20日最大回撤 ${d!=null?d.toFixed(1)+'%':'—'}${d!=null&&d<15?' · 可控✅':' · ⚠偏大'}`; },
+      pass:'波动可控，拿得住', fail:'近期回撤偏大，谨慎',
+      guide:'看净值近20日最大回撤：<15%→勾；>15%(波动大)→不勾，或降低仓位。' });
+  }
+  return C;
+}
+let CHK_AUTO={};
 function renderChecklist(){
-  const CHK_AUTO=[];
   const el=document.getElementById('checklist'); el.innerHTML='';
-  CHECKS.forEach((c,i)=>{
-    let autoVal=null; try{ autoVal=c.judge(); }catch(e){}
+  const checks=buildChecks(); CHK_AUTO={};
+  checks.forEach((c,i)=>{
+    let autoVal=null; try{ autoVal=c.judge(); }catch(e){ autoVal='manual'; }
     CHK_AUTO[i]=autoVal;
-    if(autoVal==='na') return;   // 个股无一级市场资金维度：整项移除，不展示、不影响结论分母
+    if(autoVal==='na') return;   // 该资产无此维度：整项不展示、不计入缺口
     const manual=autoVal==='manual';
-    const autoChecked=autoVal===true;
     const div=document.createElement('div'); div.className='chk';
-    div.innerHTML=`<input type="checkbox" data-chk="${i}" ${autoChecked?'checked':''} ${manual?'data-manual="1"':''}>
-      <span class="lab">${c.t}<span class="note">${c.n}</span></span>`;
-    if(manual) div.setAttribute('data-manual','1');
+    div.innerHTML=`<input type="checkbox" data-chk="${i}" ${autoVal===true?'checked':''} ${manual?'data-manual="1"':''}>
+      <span class="lab">${c.title}<span class="note">${c.src}</span></span>`;
     el.appendChild(div);
-    // 理由单独成行（勾/不勾都给出依据，便于学习判断思路）
-    const re=document.createElement('div');
-    re.id='chkevi'+i;
+    const re=document.createElement('div'); re.id='chkevi'+i;
     re.style.cssText='margin:-4px 0 10px 23px;font-size:11.5px;line-height:1.6';
     el.appendChild(re);
   });
   el.querySelectorAll('input[data-chk]').forEach(inp=>{
-    inp.dataset.manual = inp.dataset.manual || '0';
+    if(inp.dataset.manual!=='1') inp.dataset.manual='0';
     inp.addEventListener('change', updateCheckVerdict);
   });
-  // 渲染依据
-  CHECKS.forEach((c,i)=>{
-    const ev=document.getElementById('chkevi'+i);
-    if(!ev) return;
-    let txt=null;
-    try{ txt=c.evi(); }catch(e){}
-    if(CHK_AUTO[i]==='manual'){
-      const g=GUIDES[i];
-      // 诚实区分：这是「数据暂未取到（自动判断不可用）」，不是「要你手动判断」。系统一旦取到数据即自动判定 ✓/✗。
-      const reason = (i>=1&&i<=3) ? 'K线数据暂未取到（多为网络/跨域临时波动）— 结构判断自动不可用'
-                  : (i===0) ? '大盘广度数据暂未取到（push2delay 临时拦截）'
-                  : '净值/现价数据暂未取到';
-      ev.innerHTML=`<span style="color:var(--amber)">⚠ ${reason}。点「运行分析」重试，数据恢复后系统会自动判定 ✓/✗（无需你手动判断）</span><div class="src" style="color:var(--txt2);margin-top:3px;line-height:1.6">📌 若反复失败，你也可手动校验：${g}</div>`;
-    }else if(CHK_AUTO[i]==='na'){
-      ev.innerHTML=`<span style="color:var(--txt3)">ℹ 不适用（${STATE.asset}无此维度：个股 / 场外基金不涉及场内折溢价与一级市场份额申赎）</span>`;
-    }else if(txt){
-      if(CHK_AUTO[i]===true){
-        ev.innerHTML=`<span style="color:var(--green);font-weight:600">✓ 通过</span> <span class="src">理由：${txt}</span>`;
-      }else{
-        ev.innerHTML=`<span style="color:var(--red);font-weight:600">✗ 未通过</span> <span class="src">理由：${txt}（不满足勾选条件）</span>`;
-      }
+  checks.forEach((c,i)=>{
+    const ev=document.getElementById('chkevi'+i); if(!ev) return;
+    let txt=null; try{ txt=c.evi(); }catch(e){}
+    const av=CHK_AUTO[i];
+    if(av==='manual'){
+      // 诚实：数据暂未取到 = 中性，不计入缺口；系统恢复后自动判定 ✓/✗
+      ev.innerHTML=`<span style="color:var(--amber)">⚠ 数据暂未取到（网络/跨域临时波动），本项中性、不计入缺口</span><div class="src" style="margin-top:3px;line-height:1.6">📌 你也可手动校验：${c.guide}</div>`;
+    }else if(av==='na'){
+      ev.innerHTML=`<span style="color:var(--txt3)">ℹ 不适用（${STATE.asset}无此维度）</span>`;
+    }else if(av===true){
+      ev.innerHTML=`<span style="color:var(--green);font-weight:600">✓ 通过</span> <span class="src">${txt||''}</span> <span style="color:var(--green)">→ ${c.pass}</span>`;
     }else{
-      ev.innerHTML=`<span class="src">无依据</span>`;
+      ev.innerHTML=`<span style="color:var(--red);font-weight:600">✗ 未通过</span> <span class="src">${txt||''}</span> <span style="color:var(--red)">→ ${c.fail}</span>`;
     }
   });
   updateCheckVerdict();
 }
 function updateCheckVerdict(){
   const boxes=document.querySelectorAll('#checklist input[data-chk]');
-  const total=boxes.length;
-  const checked=document.querySelectorAll('#checklist input[data-chk]:checked').length;
-  const gap=total-checked;
+  let pass=0, fail=0, pending=0, total=0;
+  boxes.forEach(inp=>{
+    const i=+inp.dataset.chk; const av=CHK_AUTO[i]; total++;
+    if(av==='manual'){ if(inp.checked) pass++; else pending++; }   // 数据缺失：用户手勾才算过，否则中性
+    else if(av===true){ pass++; }
+    else if(av===false){ if(inp.checked) pass++; else fail++; }     // 真未通过：计入缺口
+  });
+  const gap=fail;
   const cv=document.getElementById('checkVerdict');
   let v, col;
   if(gap<=1){ v='复盘缺口≤1 → 高价值机会，可右侧参与'; col='var(--green)'; }
   else if(gap===2){ v='缺口2条 → 观望或小仓博弈'; col='var(--amber)'; }
   else { v='缺口≥3条 → 坚决观望，不参与'; col='var(--red)'; }
-  cv.innerHTML=`清单结论：<span style="color:${col}">${v}</span><div class="sub">已勾选 ${checked}/${total} 项。配套四层 RAG 一起看，二者冲突时以价格趋势(L3)为准。</div>`;
+  cv.innerHTML=`清单结论：<span style="color:${col}">${v}</span><div class="sub">已确认通过 ${pass} 项 · 真未通过 ${fail} 项${pending?` · 待数据 ${pending} 项(中性，不计入缺口)`:''}（共 ${total} 项，按「${STATE.asset}」维度）。配套四层 RAG 一起看，冲突时以价格趋势(L3)为准。</div>`;
 }
 
 /* ---- 事件 ---- */
