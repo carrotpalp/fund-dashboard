@@ -148,20 +148,30 @@
   async function fetchMarketBreadth(){
     const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
     const fields='f2,f3,f6,f12';
-    const pz=6000; const host='push2delay.eastmoney.com';
-    try{
-      const cb='mcb'+Math.random().toString(36).slice(2);
-      const url=`https://${host}/api/qt/clist/get?pn=1&pz=${pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}&_=${Date.now()}`;
-      const d=await jsonpGet(url, cb);
-      const arr=d&&d.data&&d.data.diff;
-      if(!arr||!arr.length) return null;
-      const pct=arr.map(x=>x.f3/100).sort((a,b)=>a-b);
-      const n=pct.length;
-      const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
-      const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length;
-      const totAmt=arr.reduce((s,x)=>s+(x.f6||0),0);
-      return {median, up, dn, total:n, upPct:up/n*100, totAmt, source:host};
-    }catch(e){ return null; }
+    const host='push2delay.eastmoney.com';
+    // 关键坑：东财 clist JSONP 单页最多返回 100 条(pz 参数被忽略，实测 pz=6000/1000 均只回 100)，
+    // 且按 f3(涨跌幅) 降序时首页恰是「涨幅榜前 100」，直接算 upPct 会得 100% 的抽样偏差。
+    // 故分页拉全市场(全A约5542只→56页)，按 f12(代码) 排序保证跨页为无偏抽样，再合并计算真实广度。
+    const PER=100, TOTAL_PAGES=56, BATCH=6; // 控制并发，避免触发限流/连接耗尽
+    const all=[];
+    for(let i=0;i<TOTAL_PAGES;i+=BATCH){
+      const batch=[];
+      for(let pn=i+1; pn<=Math.min(i+BATCH,TOTAL_PAGES); pn++){
+        const cb='mcb'+Math.random().toString(36).slice(2);
+        const url=`https://${host}/api/qt/clist/get?pn=${pn}&pz=${PER}&po=1&np=1&fltt=2&invt=2&fid=f12&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}&_=${Date.now()}`;
+        batch.push(jsonpGet(url,cb).then(d=>(d&&d.data&&d.data.diff)||[]).catch(()=>[]));
+      }
+      const res=await Promise.allSettled(batch);
+      res.forEach(r=>{ const arr=(r.status==='fulfilled'&&r.value)||[]; if(arr&&arr.length) all.push(...arr); });
+    }
+    if(all.length<500) return null; // 拉取过少视为失败
+    const pct=all.map(x=>x.f3).filter(v=>typeof v==='number'&&!isNaN(v)).map(v=>v/100).sort((a,b)=>a-b);
+    const n=pct.length;
+    if(!n) return null;
+    const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
+    const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length, flat=n-up-dn;
+    const totAmt=all.reduce((s,x)=>s+(Number(x.f6)||0),0);
+    return {median, up, dn, flat, total:n, upPct:up/n*100, totAmt, source:host};
   }
 
   // 研报(分析师评级/研报)按个股拉取：东方财富 reportapi list 接口，code=个股6位代码 + qType=0 可按个股过滤
@@ -355,12 +365,11 @@
       try{ const q=await fetchQuoteFlow(priceSecid); if(q) flow=mainForceFlow(q); }catch(e){}
       if(price) res.name = price.name||res.name;
     }
-    // 个股：拉取真实「研报」(reportapi 按 code 过滤) 与「主力/机构参与度」(东财 RPT_DMSK_TS_STOCKNEW)
+    // 研报：个股/ETF/基金均按 code 尝试拉取(reportapi 按 code 过滤，部分指数/ETF也可能有覆盖；无则如实显示)
+    // 主力参与度：仅个股有真实字段(东财 RPT_DMSK_TS_STOCKNEW)，基金无此维度
     let research=null, mainForce=null;
-    if(isStock){
-      try{ research=await fetchResearch(ni.code); }catch(e){}
-      try{ mainForce=await fetchMainForce(ni.code); }catch(e){}
-    }
+    try{ research=await fetchResearch(ni.code); }catch(e){}
+    if(isStock){ try{ mainForce=await fetchMainForce(ni.code); }catch(e){} }
     let klines=null, srcInfo='';
     if(isOCF && fund){ klines=navSeries(fund); srcInfo='净值历史(pingzhongdata)'; }
     else{
@@ -527,6 +536,12 @@
   .fw-market .fm-body b{ font-weight:800; }
   .fw-market .fm-body .up{ color:#ef4444; } .fw-market .fm-body .down{ color:#22c55e; }
   .fw-market .fm-sub{ color:var(--txt2); font-size:11px; }
+  .fw-legend{ border:1px dashed var(--border); border-radius:10px; padding:6px 14px; background:var(--panel2); margin-bottom:12px; font-size:12.5px; }
+  .fw-legend summary{ cursor:pointer; color:var(--accent); font-weight:700; user-select:none; }
+  .fw-legend summary::-webkit-details-marker{ color:var(--accent); }
+  .fw-legend-body{ margin-top:8px; line-height:1.65; color:var(--txt); }
+  .fw-legend-body p{ margin:6px 0; }
+  .fw-legend-body b{ color:var(--txt); }
   `;
   function injectCSS(){
     if(document.getElementById('fw-style')) return;
@@ -548,10 +563,12 @@
     const volMark = (s&&s.volUp)?'✅':'⚠';
     const daysTxt = s? s.days : 0;
     const hhTxt = s? s.hh : 0;
-    let rsTxt = '结构持续'+(structOk?'✓':'✗')+'(持续'+daysTxt+'日·创新高'+hhTxt+'次·放量'+volMark+')';
-    if(r && r.research && r.research.count>0){ rsTxt += '；研报'+r.research.count+'篇·'+r.research.bullPct+'%买入/增持'; }
-    else { rsTxt += '；研报无覆盖'; }
-    items.push({t:'② 赛道基本面', pass:structOk, na:false, reason:rsTxt});
+    // ② 实为「价格结构(持续)」判定：需同时满足 持续≥10日 + 创新高≥2次 + 放量确认；研报是独立维度，不决定此项
+    let rsTxt = '持续'+daysTxt+'日·创新高'+hhTxt+'次·放量'+volMark;
+    rsTxt += structOk ? '：结构持续成立(偏基本面驱动)' : '：放量未确认⚠→结构未确认';
+    if(r && r.research && r.research.count>0){ rsTxt += '；研报共识 '+r.research.count+'篇·'+r.research.bullPct+'%买入/增持'; }
+    else { rsTxt += (r && (r.asset==='场内ETF'||r.asset==='场外基金')) ? '；研报 无（ETF/基金无个股研报）' : '；研报 无覆盖'; }
+    items.push({t:'② 价格结构(持续)', pass:structOk, na:false, reason:rsTxt});
     const pct=L.L2?L.L2.pct:null;
     items.push({t:'③ 估值不贵', pass: pct!=null && pct<75, na:false, reason: pct!=null?`分位${pct.toFixed(0)}%`:'—'});
     const st=L.L3; const ok4 = st? (st.trend==='uptrend'||(st.trend==='mixed'&&st.maBull)) : false;
@@ -644,7 +661,15 @@
         ${sent?`<span>情绪 <b>${sent.label}(${sent.score})</b></span>`:''}
         <span class="pill ${regimeCls}">${regimeTxt}</span>
       </div></div>` : '';
-    sectionEl.innerHTML = `<div class="fw-recap">${summary}${marketHtml}<div class="fw-cards">${cards}</div>
+    const legendHtml = `<details class="fw-legend">
+      <summary>图例与判定说明（✓ / ✗ / ⚠ 是什么？点开看）</summary>
+      <div class="fw-legend-body">
+        <p><b>✓</b> 该维度条件满足，对建议为<b>正向</b>；<b>✗</b> 该维度条件未满足，会<b>拉低建议等级</b>；<b>⚠</b> 关注/警告——通常是未通过的原因或风险信号（如放量未确认、异常放量、折溢价偏离大）。</p>
+        <p><b>② 价格结构(持续)</b> 需同时满足三项才打 ✓：① 上涨持续 ≥10 日；② 区间创新高 ≥2 次；③ 放量确认（近段成交量显著高于前段）。任一项不满足即 ✗。<br>例如润泽科技「持续122日·创新高6次·放量⚠」满足前两项，但<b>放量未确认(⚠)</b>，故整体 ✗——提示量价配合不足、需警惕派发，<b>与研报无关</b>。</p>
+        <p><b>研报共识</b> 是<b>独立维度</b>（分析师评级统计），不参与 ② 结构判定，仅在卡片徽章与 ② 备注中展示，作为基本面旁证。研报 100% 买入 ≠ 结构必然成立。</p>
+        <p><b>大盘环境</b> 由全市场约 5500 只 A 股实时涨跌计算（上涨占比=上涨家数/总数），用于校准每只标的的建议（系统性偏弱时降仓）。</p>
+      </div></details>`;
+    sectionEl.innerHTML = `<div class="fw-recap">${summary}${marketHtml}${legendHtml}<div class="fw-cards">${cards}</div>
       <div class="fw-src" style="margin-top:12px">说明：建议为框架综合研判结论（四层+水下层），非个性化投资建议；市场情绪为恐惧贪婪代理。复盘在打开/刷新页面时基于最新可得数据生成；日K线为上一交易日收盘，盘中实时价仅影响现价与资金流。报告仅供参考，不构成个人投资建议。</div></div>`;
   }
 
