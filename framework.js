@@ -547,12 +547,17 @@
     const isStock = !(L.L4.isETF||L.L4.isOCF);
     if(isStock) reasons.unshift('【个股·权威维度】价格趋势(L3)为本体，主力资金流(L5)为最终验证与加权项');
     // 硬约束：下降趋势 + 主力流出 → 明确不建议（不接下落刀）；绝不逆势抄底
+    const trendOk = (L.L3 && (L.L3.trend==='uptrend' || L.L3.maBull));
+    const trendLabel = (L.L3 && L.L3.trend==='uptrend') ? '趋势向上' : ((L.L3 && L.L3.maBull) ? '震荡·均线多头' : ((L.L3 && L.L3.trend==='downtrend') ? '趋势向下' : '趋势震荡'));
     let call = (T<=-0.5 && F<=-0.5) ? '不建议' : '观望';
+    let blockReason = (T<=-0.5 && F<=-0.5) ? '价格趋势向下且主力资金流出，不接下落刀' : '';
     if(call!=='不建议'){
-      const trendOk = (L.L3 && (L.L3.trend==='uptrend' || L.L3.maBull));
       if(score>=1.5 && trendOk) call='建议买入';
+      else if(score>=1.5 && !trendOk){ blockReason='综合分已够('+score.toFixed(2)+'≥1.5)，但价格趋势未满足买入门槛('+trendLabel+')'; }
+      else if(trendOk){ blockReason='趋势向上，但综合分不足('+score.toFixed(2)+'<1.5)'; }
+      else { blockReason='价格趋势未满足('+trendLabel+')，且综合分不足('+score.toFixed(2)+'<1.5)'; }
     }
-    return {call, score:+score.toFixed(2), reasons};
+    return {call, score:+score.toFixed(2), reasons, trendOk, trendLabel, blockReason};
   }
 
   /* ----------------------------- CSS(一次性注入) ----------------------------- */
@@ -572,6 +577,7 @@
   .fw-card .at{ font-size:11px; color:var(--txt2); border:1px solid var(--border); border-radius:6px; padding:1px 6px; }
   .fw-card .px{ font-size:13px; margin:4px 0 8px; color:var(--txt2); }
   .fw-card .verdict{ font-size:18px; font-weight:800; padding:6px 0; }
+  .fw-card .fw-score{ font-size:11px; color:var(--txt2); margin:-4px 0 6px; line-height:1.4; }
   .fw-badges{ display:flex; flex-wrap:wrap; gap:5px; margin:6px 0; }
   .fw-badge{ font-size:11px; padding:2px 7px; border-radius:6px; background:var(--panel2); color:var(--txt2); border:1px solid var(--border); }
   .fw-badge.good{ color:#22c55e; border-color:rgba(34,197,94,.4); }
@@ -703,6 +709,7 @@
         <div class="hd"><span class="cd">${r.code}</span></div>
         <div class="px">${priceTxt}</div>
         <div class="verdict ${verdictClass(vd.call)}">${vd.call}</div>
+        <div class="fw-score" title="综合分=${vd.score}，买入门槛：价格趋势向上 + 综合分≥1.5">综合分 ${vd.score} · 趋势门槛${vd.trendOk?'✓':'✗'}${vd.blockReason?' · '+vd.blockReason:''}</div>
         <div class="fw-badges">${pb.join('')}</div>
         <div class="fw-reason">${reason}</div>
         ${chkHtml}

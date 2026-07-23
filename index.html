@@ -56,6 +56,13 @@ body{font-family:var(--sans);background-color:var(--bg-main);color:var(--text-1)
 .hdr-live.ok{color:var(--up)} .hdr-live.stale{color:var(--amber)}
 .dash-title{justify-self:start}
 .dash-header-r{justify-self:end;justify-content:flex-end}
+/* Tool nav — 顶部工具导航（可扩展） */
+.tool-nav{display:inline-flex;align-items:center;gap:4px;background:rgb(from var(--bg-panel2) r g b /.6);border:1px solid var(--border);border-radius:999px;padding:4px}
+.tool-link{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text-2);text-decoration:none;transition:background .15s,color .15s,border-color .15s;border:1px solid transparent;white-space:nowrap}
+.tool-link:hover{background:var(--bg-hover);color:var(--text-1);border-color:var(--border-light)}
+.tool-link.active{background:rgb(from var(--accent) r g b /.15);color:var(--accent);border-color:rgb(from var(--accent) r g b /.35)}
+.tool-link .tool-icon{font-size:13px;line-height:1}
+@media(max-width:760px){.tool-link{padding:5px 8px}.tool-link .tool-label{display:none}}
 /* Theme toggle & accent picker */
 .theme-bar{display:inline-flex;align-items:center;gap:8px;margin-left:6px;vertical-align:middle}
 .theme-btn{width:36px;height:20px;border-radius:10px;background:var(--text-3);position:relative;cursor:pointer;border:1px solid var(--border);transition:background .2s;flex:none}
@@ -644,7 +651,12 @@ html.light .theme-btn::after{content:'☀️';left:16px}
         </label>
       </span>
       <button id="resetLayout" class="layout-reset-btn" title="恢复面板默认尺寸（清空手动拖拽/缩放）">重置布局</button>
-      <a href="trend.html" target="_blank" rel="noopener" class="layout-reset-btn" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px" title="打开四层趋势框架 · ETF 趋势判断工具">📈 趋势工具</a>
+      <nav class="tool-nav" aria-label="工具导航">
+        <a class="tool-link active" href="trend.html" target="_blank" rel="noopener" title="四层趋势框架 · ETF/个股趋势判断">
+          <span class="tool-icon">📈</span>
+          <span class="tool-label">趋势判断</span>
+        </a>
+      </nav>
       <span id="headerRight"></span>
     </div>
   </header>
@@ -5274,7 +5286,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
 </script>
 
 <!-- AI复盘 引擎（四层框架 + 水下层，共享于 trend.html L5） -->
-<script src="framework.js?v=2026072318"></script>
+<script src="framework.js?v=202607231840"></script>
 <script>
   (function(){
     function go(){ try{ if(window.FW) FW.renderRecap(document.getElementById('aiRecap')); }catch(e){ console.error('recap',e); } }
