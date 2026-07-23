@@ -176,7 +176,21 @@
       }catch(e){ resolve(null); }
     });
   }
+  // 大盘广度：优先用预生成快照(服务器算好→浏览器零分页零限流)，兜底才实时分页
   async function fetchMarketBreadth(){
+    try{
+      const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
+      if(r.ok){
+        const j = await r.json();
+        if(j && typeof j.median==='number' && j.total>=2000){
+          const freshH = (Date.now() - new Date(j.generatedAt).getTime()) < 3*86400000;
+          return Object.assign({}, j, {source:'snapshot·'+(j.source||'eastmoney'), fresh:freshH, snapshotAt:j.generatedAt});
+        }
+      }
+    }catch(e){}
+    return fetchMarketBreadthLive();
+  }
+  async function fetchMarketBreadthLive(){
     const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
     const fields='f2,f3,f6,f12';
     const host='push2delay.eastmoney.com';
@@ -608,7 +622,7 @@
     const L=r.layers, items=[];
     const L4=L.L4;
     const m = global.STATE && global.STATE.market;
-    if(m){ const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
+    if(m){ const ok=m.median>=0.001 && m.upPct>=45 && m.totAmt>=6000*1e8;
       items.push({t:'① 大盘环境', pass:ok, na:false, reason:`中位${m.median>=0?'+':''}${m.median.toFixed(2)}%·涨${m.upPct.toFixed(0)}%·成交${(m.totAmt/1e8).toFixed(0)}亿`}); }
     else items.push({t:'① 大盘环境', pass:false, na:true, reason:'见顶部全局环境'});
     const s=L.L2b;
@@ -706,7 +720,7 @@
     let regimeTxt='中性环境', regimeCls='fw-pill-hold';
     if(mk){ if(mk.median<0 && mk.upPct<45){ regimeTxt='系统性偏弱·降仓'; regimeCls='fw-pill-sell'; } else if(mk.upPct>=55 && mk.median>0){ regimeTxt='顺势偏强'; regimeCls='fw-pill-buy'; } }
     const marketHtml = mk ? `<div class="fw-market">
-      <div class="fm-hd">大盘环境（直接展示，用于校准每只标的的建议）</div>
+      <div class="fm-hd">大盘环境（直接展示，用于校准每只标的的建议${mk.snapshotAt?(' · 数据 '+mk.snapshotAt.slice(0,10)):''}）</div>
       <div class="fm-body">
         <span>中位涨跌幅 <b class="${mk.median>=0?'up':'down'}">${mk.median>=0?'+':''}${mk.median.toFixed(2)}%</b></span>
         <span>上涨占比 <b>${mk.upPct.toFixed(0)}%</b> <span class="fm-sub">(${mk.up}/${mk.total})</span></span>

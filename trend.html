@@ -271,7 +271,21 @@ async function fetchPrice(secid){
 /* 大盘赚钱效应：拉全市场(沪深京约5542只)算涨跌中位数+涨/跌占比+总成交额。
    关键坑(已修)：东财 clist 的 pz 参数被忽略(实测 pz=6000/1000 均只回100条)，且 fid=f3(按涨跌幅排序)首页恰是「涨幅榜前100」→ 只用1页会得到「中位+0.10%·涨100%·成交424亿」的有偏样本。
    正确做法：分页拉全市场(每页100→56页)，fid=f12(按代码排序=无偏抽样)合并全部；首屏读 data.total 动态算页数；拉取过少(<2000)视为失败返回 null，绝不展示有偏样本。 */
+// 大盘广度：优先用预生成快照(服务器算好→浏览器零分页零限流)，兜底才实时分页
 async function fetchMarketBreadth(){
+  try{
+    const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
+    if(r.ok){
+      const j = await r.json();
+      if(j && typeof j.median==='number' && j.total>=2000){
+        const freshH = (Date.now() - new Date(j.generatedAt).getTime()) < 3*86400000;
+        return Object.assign({}, j, {source:'snapshot·'+(j.source||'eastmoney'), fresh:freshH, snapshotAt:j.generatedAt});
+      }
+    }
+  }catch(e){}
+  return fetchMarketBreadthLive();
+}
+async function fetchMarketBreadthLive(){
   const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
   const fields='f2,f3,f6,f12';
   const host='push2delay.eastmoney.com';
@@ -463,14 +477,14 @@ function renderL1(code){
   const m=STATE.market;
   let mb='';
   if(m){
-    const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
+    const ok=m.median>=0.001 && m.upPct>=45 && m.totAmt>=6000*1e8;
     const col=ok?'var(--green)':'var(--red)';
     const verdict=ok?'✓ 环境友好（通过·可勾）':'✗ 环境偏弱（不通过·不勾）';
     const why=ok
       ? '中位数转正、涨多跌少、成交活跃 → 系统性环境利于个股表现，可放宽选股条件。'
       : '中位数偏弱 / 涨少跌多 / 成交低迷 → 系统性风险偏大，宜控仓、只做最强结构。';
     mb=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
-      <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">大盘赚钱效应（自动 · 全市场${m.total}只 · <span class="src">${m.source}</span>）</div>
+      <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">大盘赚钱效应（自动 · 全市场${m.total}只 · <span class="src">${m.source}${m.snapshotAt?(' · '+m.snapshotAt.slice(0,10)):''}${m.fresh===false?' · 偏旧':''}</span>）</div>
       <div class="kv"><span class="k">涨跌中位数</span><span class="v" style="color:${m.median>=0?'var(--up)':'var(--down)'}">${m.median>=0?'+':''}${m.median.toFixed(2)}%</span></div>
       <div class="kv"><span class="k">上涨家数占比</span><span class="v">${m.upPct.toFixed(1)}%（${m.up}涨 / ${m.dn}跌）</span></div>
       <div class="kv"><span class="k">两市成交额</span><span class="v">${(m.totAmt/1e8).toFixed(0)}亿</span></div>
