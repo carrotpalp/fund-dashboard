@@ -109,23 +109,9 @@
     _pzdChain = next.then(()=>{}, ()=>{});   // 防止链式 reject 阻断后续
     return next;
   }
-  // 赛道/个股主题词：剥离基金公司前缀与 ETF/LOF 后缀，用于研报检索（镜像 trend.html fundTheme）
-  function themeOf(name){
-    if(!name) return '';
-    let s=String(name).split('ETF')[0].split('LOF')[0];
-    ['国泰','华夏','易方达','南方','博时','广发','嘉实','天弘','汇添富','银华','招商','华安','富国','鹏华','工银瑞信','建信','中欧','景顺','兴全','交银','东方红','平安','大成','诺安','前海开源','华宝','国联安','申万','兴业','国寿','泰康','永赢','民生','光大','海富通','万家','国投','安信','中银','农银','长城','华泰','浙商','财通','东财','同泰'].forEach(m=>{ s=s.replace(m,''); });
-    return s.trim();
-  }
-  // 研报密度（东方财富研报中心，JSONP 可用；fetch 被 CORS 拦截故走 JSONP）。返回近90天研报篇数，失败时 null。
-  async function fetchResearchCount(keyword){
-    if(!keyword) return null;
-    const end=ymd(new Date()), start=ymd(new Date(Date.now()-90*864e5));
-    const kw=encodeURIComponent(keyword);
-    const cb='rsh'+Math.random().toString(36).slice(2,10);
-    const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=1&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}&cb=${cb}`;
-    try{ const d=await jsonpGet(url, cb); return (d&&d.hits!=null)? d.hits : null; }
-    catch(e){ return null; }
-  }
+  // 注：原「研报密集」信号已移除——东方财富 reportapi 的 keyword 参数被服务端忽略（实测 半导体/白酒/医药 均返回 2925），
+  // 而按 code 过滤返回 0，免费接口无法按个股/主题过滤研报篇数。保留该信号会向每只标的填同一个全局数字（误导），
+  // 故 ② 改为纯价格结构判定；如需真实研报密度需付费数据终端。
   function navSeries(fund){
     const nw=fund&&fund.netWorthTrend;
     if(!nw||!nw.length) return null;
@@ -354,9 +340,6 @@
       L4:{isETF,isOCF,net5,total,premium},
       UW:{chip, div, flow, sentiment:null}
     };
-    // 研报密度（主题/个股，JSONP 可用）：仅作 corroboration，非判定门槛
-    const theme=themeOf(res.name);
-    res.research = theme ? await fetchResearchCount(theme) : null;
     res.dataDate = klines.length ? klines[klines.length-1].date : '';
     const _today = ymd(new Date());
     // 数据截至 = 最近一个“已完成”交易日：盘中 gtimg 会返回当天未完成 bar（日期=today），
@@ -461,9 +444,6 @@
   function badge(text, cls){ return `<span class="fw-badge ${cls||''}">${text}</span>`; }
   function verdictClass(call){ return call==='建议买入'?'fw-pill-buy':(call==='不建议'?'fw-pill-sell':'fw-pill-hold'); }
 
-  // 研报“密集”阈值：近90天主题研报 ≥ 此数视为机构密集关注（② 赛道基本面边际改善的判定条件之一）
-  const RESEARCH_DENSE = 8;
-
   // 复盘卡片用的逐项 5 步清单：返回 [{t, pass, na, reason}]，pass/fail 与趋势工具 CHECKS 逻辑一致
   function fwChecklist(r){
     const L=r.layers, items=[];
@@ -472,12 +452,10 @@
       items.push({t:'① 大盘环境', pass:ok, na:false, reason:`中位${m.median>=0?'+':''}${m.median.toFixed(2)}%·涨${m.upPct.toFixed(0)}%·成交${(m.totAmt/1e8).toFixed(0)}亿`}); }
     else items.push({t:'① 大盘环境', pass:false, na:true, reason:'见顶部全局环境'});
     const s=L.L2b; const structOk = s? s.sustained : false;
-    const rc = (typeof r.research==='number')? r.research : (r.research&&r.research.count!=null? r.research.count : null);
-    const researchOk = (rc==null)? null : (rc>=RESEARCH_DENSE);
-    const ok2 = structOk && (researchOk===null? true : researchOk);
-    let r2 = `结构持续${structOk?'✓':'✗'}`;
-    if(rc==null) r2+=' · 研报未取到(仅看结构)'; else r2+=` · 研报${rc}篇${researchOk?'密集✓':'偏少✗'}`;
-    items.push({t:'② 赛道基本面', pass:ok2, na:false, reason:r2});
+    const volMark = (s&&s.volUp)?'✅':'⚠';
+    const daysTxt = s? s.days : 0;
+    const hhTxt = s? s.hh : 0;
+    items.push({t:'② 赛道基本面', pass:structOk, na:false, reason:'结构持续'+(structOk?'✓':'✗')+'(持续'+daysTxt+'日·创新高'+hhTxt+'次·放量'+volMark+')；研报密集佐证已剔除(免费接口无法按个股过滤)'});
     const pct=L.L2?L.L2.pct:null;
     items.push({t:'③ 估值不贵', pass: pct!=null && pct<75, na:false, reason: pct!=null?`分位${pct.toFixed(0)}%`:'—'});
     const st=L.L3; const ok4 = st? (st.trend==='uptrend'||(st.trend==='mixed'&&st.maBull)) : false;
@@ -529,7 +507,6 @@
         if(L.L4.net5!=null) pb.push(badge('净申赎'+L.L4.net5.toFixed(1)+'亿', L.L4.net5>=-5?'good':'bad'));
         if(L.L4.premium!=null) pb.push(badge('折溢价'+L.L4.premium.toFixed(1)+'%', Math.abs(L.L4.premium)<=3?'':(L.L4.premium>0?'warn':'warn')));
       }
-      if(r.research!=null) pb.push(badge('研报'+r.research+'篇', r.research>=20?'good':(r.research<5?'warn':'')));
       const uw=L.UW;
       if(uw.chip&&!uw.chip.na) pb.push(badge('获利盘'+uw.chip.profitRatio.toFixed(0)+'%', uw.chip.profitRatio>=60?'good':(uw.chip.profitRatio<=35?'bad':'')));
       if(uw.flow&&!uw.flow.na) pb.push(badge('主力'+(uw.flow.netY>=0?'+':'')+uw.flow.netY.toFixed(1)+'亿', uw.flow.netY>0?'good':'bad'));

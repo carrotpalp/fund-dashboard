@@ -561,7 +561,6 @@ async function analyze(){
     const nm=(price&&price.name)||(fund&&fund.name)||code;
     document.getElementById('meta').innerHTML=`标的：<b>${nm}</b> · 类型【${STATE.asset}】· K线数据缺失，仅展示可用层（L1 基本面 / L4 资金）。`;
     renderChecklist();
-    fetchSectorResearch();
     btn.disabled=false; btn.textContent='运行分析'; return;
   }
 
@@ -606,7 +605,6 @@ async function analyze(){
     `标的：<b>${nm}</b> · 类型【${STATE.asset}】· 代码 ${code} · 数据区间 ${klines[0].date} ~ ${klines[klines.length-1].date}（${klines.length}交易日）· 现价 <b>${price?price.price.toFixed(3):cur.toFixed(3)}</b> · 序列源：${srcInfo}`;
 
   renderChecklist();
-  fetchSectorResearch();
   }catch(e){ console.error('analyze error:', e); try{ document.getElementById('meta').innerHTML='分析出错：'+(e&&e.message?e.message:e)+'（按钮已解锁，可重试）'; }catch(_){} }
   finally{ btn.disabled=false; btn.textContent='运行分析'; }
 }
@@ -676,22 +674,9 @@ function fundTheme(name){
   return s.trim();
 }
 function ymd(d){ const p=n=>(''+n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
-// 尽力而为：拉赛道研报数量做情绪参考（CORS 失败则静默跳过，不影响结构判断）
-async function fetchSectorResearch(){
-  const theme=fundTheme(STATE.fund&&STATE.fund.name)||'';
-  if(!theme) return;
-  try{
-    const end=ymd(new Date()), start=ymd(new Date(Date.now()-90*864e5));
-    const kw=encodeURIComponent(theme);
-    const cb='rsh'+Math.random().toString(36).slice(2,10);
-    const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=1&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}&cb=${cb}`;
-    const d=await jsonpGet(url, cb);   // 浏览器 fetch 被 CORS 拦截，改 JSONP（reportapi 支持，回调名需纯字母）
-    const cnt=(d&&d.hits!=null)? d.hits : 0;
-    STATE.research={ok:true, count:cnt};
-  }catch(e){ STATE.research={ok:false}; }
-  const ev=document.getElementById('chkevi1');
-  if(ev && CHECKS[1] && CHECKS[1].evi){ try{ ev.innerHTML=`<span class="src">${CHECKS[1].evi()}</span>`; }catch(e){} }
-}
+// ② 的「研报密集」佐证已移除：东方财富 reportapi 的 keyword 被服务端忽略（实测 半导体/白酒/医药 均返回 2925），
+// 按 code 过滤又返回 0，免费接口无法按个股/主题过滤研报篇数。保留会向每只标的填同一全局数字（误导），
+// 故 ② 改为纯价格结构判定；如需真实研报密度需付费数据终端。
 function netFlowText(daily){
   if(!daily||!daily.length) return '';
   return daily.slice(-30).map(p=>p.d+','+p.s).join('\n');
@@ -860,7 +845,6 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
 /* ---- 5步复盘清单 ---- */
 /* 语义约定：勾选 = 该项通过（绿灯，可动手）；未勾 = 不通过（红灯，回避）。
    系统已按实时数据自动判定每项勾选/不勾；仅当数据真取不到时才给出手动校验指引。 */
-const RESEARCH_DENSE=8;   // 近90天主题研报 ≥ 此数视为“密集”（② 赛道基本面边际改善的判定条件之一）
 const CHECKS=[
   {
     t:'① 大盘赚钱效应达标：上涨家数占比≥45% 且 涨跌中位数≥+0.1% 且 成交额≥6000亿',
@@ -879,27 +863,20 @@ const CHECKS=[
     }
   },
   {
-    t:'② 赛道基本面边际改善：价格结构持续抬升（持续≥10日+创新高≥2次+放量）且研报密集，非纯消息脉冲',
-    n:'数据驱动：价格结构持续性(持续天数/创新高/量能) + 研报数量(尽力)',
+    t:'② 赛道基本面边际改善：价格结构持续抬升（持续≥10日+创新高≥2次+放量），非纯消息脉冲',
+    n:'数据驱动：价格结构持续性(持续天数/创新高/量能) — 自动判定，无需手动',
     judge:()=>{
       if(!STATE.klines) return 'manual';
       const s=sustainSignal(STATE.klines);
-      const structOk=s.sustained;
-      const r=STATE.research;
-      const researchOk = (r&&r.ok) ? (r.count>=RESEARCH_DENSE) : null;   // null=未取到，仅看结构
-      return structOk && (researchOk===null ? true : researchOk);
+      return s.sustained;   // 纯结构判定：持续≥10日 且 创新高≥2次 且 放量
     },
     evi:()=>{
       if(!STATE.klines) return null;
       const s=sustainSignal(STATE.klines);
-      const structOk=s.sustained;
-      let txt=`结构持续 ${s.days}交易日·创新高${s.hh}次·量能${s.volUp?'放大✅':'未放大⚠'} → ${structOk?'满足':'不满足'}`;
-      const r=STATE.research;
-      if(r&&r.ok){ const dense=r.count>=RESEARCH_DENSE; txt+=` · 研报${r.count}篇${dense?'密集✅(满足)':'偏少⚠(不满足“研报密集”)'}`; }
-      else txt+=' · 研报未取到(仅结构判定)';
-      const researchOk = (r&&r.ok)?(r.count>=RESEARCH_DENSE):null;
-      const pass = structOk && (researchOk===null?true:researchOk);
-      txt += ` → 综合：${pass?'✓ 通过(可勾)':'✗ 未通过(不勾)'}（结构为必要条件，研报密集为佐证/必要条件）`;
+      const ok=s.sustained;
+      let txt=`结构持续 ${s.days}交易日(${ok?'≥10✓':'<10✗'})·创新高${s.hh}次(${s.hh>=2?'≥2✓':'<2✗'})·量能${s.volUp?'放大✅':'未放大⚠'} → ${ok?'满足「持续抬升」':'不满足'}`;
+      txt += ` → 综合：${ok?'✓ 通过(可勾)':'✗ 未通过(不勾)'}(价格结构为必要条件，偏基本面驱动而非单日脉冲)`;
+      txt += `。注：原含「研报密集」佐证，但免费研报接口无法按个股过滤(实测 keyword 被忽略、code 返回0)，已剔除该不可靠信号。`;
       return txt;
     }
   },
@@ -981,7 +958,7 @@ const CHECKS=[
 /* 当某项无法自动判定时，给出明确的「如何校验」步骤（代替无用的"需你自判"） */
 const GUIDES=[
   '打开东方财富/同花顺「涨跌家数」看「上涨家数占比」+ 全市场成交额。判定：上涨占比≥45% 且 个股涨幅中位数≥+0.1% 且 成交额≥6000亿 → 勾（系统性环境友好）；否则不勾。',
-  '①看近20日K线是否持续抬升、连续创新高≥2次（结构持续性）；②东方财富研报中心搜赛道关键词，看近90天研报数量（密集=机构关注）；③搜产业新闻确认订单/capex/政策边际。判定：结构持续+研报密集+无重大利空 → 勾；纯单日脉冲消息 → 不勾。',
+  '①看近20日K线是否持续抬升、连续创新高≥2次且放量（结构持续性）；②搜产业新闻确认订单/capex/政策边际（结构持续需有基本面支撑，而非单日脉冲消息）。判定：结构持续抬升+有基本面催化 → 勾；纯单日脉冲消息、无量空涨 → 不勾。',
   '东方财富/中证指数官网查该指数「PE/PB 5年历史分位」。判定：分位<75%（不贵）→ 勾；>75%（高位警惕）→ 不勾。若仅看价格，当前价处于近52周低位/高位同理。',
   '看K线——最近一个低点是否高于前一个低点(HL)、最近一个高点是否高于前一个高点(HH)；且收盘价站上MA20并MA20>MA60（均线多头）。判定：结构上升或震荡+均线多头 → 勾；明确下降(高低点下移) → 不勾。',
   '集思录/东方财富查该ETF「场内折溢价」与基金公告「份额变动」。判定：折溢价|x|≤3% 且 近5日净申赎≥-5亿份 → 勾；溢价>3%（多为套利盘主导，反弹可信度低）或大幅净赎回 → 不勾。'
