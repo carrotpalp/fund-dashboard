@@ -683,11 +683,10 @@ async function fetchSectorResearch(){
   try{
     const end=ymd(new Date()), start=ymd(new Date(Date.now()-90*864e5));
     const kw=encodeURIComponent(theme);
-    const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=30&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}`;
-    const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),10000);
-    const r=await fetch(url,{signal:ctrl.signal}); clearTimeout(to); if(!r.ok) return;
-    const d=await r.json();
-    const cnt=(d&&d.data)?d.data.length:0;
+    const cb='rsh'+Math.random().toString(36).slice(2,10);
+    const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=1&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}&cb=${cb}`;
+    const d=await jsonpGet(url, cb);   // 浏览器 fetch 被 CORS 拦截，改 JSONP（reportapi 支持，回调名需纯字母）
+    const cnt=(d&&d.hits!=null)? d.hits : 0;
     STATE.research={ok:true, count:cnt};
   }catch(e){ STATE.research={ok:false}; }
   const ev=document.getElementById('chkevi1');

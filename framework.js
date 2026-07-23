@@ -83,22 +83,48 @@
     if(arr && arr.length) return arr.map(p=>({date:p[0], open:+p[1], close:+p[2], high:+p[3], low:+p[4], vol:+p[5], amount:0, amp:0}));
     throw new Error('gtimg K线为空');
   }
+  /* loadPzd 并发安全：pingzhongdata 脚本把数据挂到 window.Data_* 全局变量，
+   * 若多只基金并发加载，后加载的脚本会覆盖全局变量，导致先完成的基金读到错/空数据
+   * （复盘按 4 只一批 Promise.all 并发时尤甚，最后那只 QDII 常被覆盖成"数据暂缺"）。
+   * 解法：全局串行队列，任意时刻仅一个脚本在飞，onload 时全局变量稳定。 */
+  let _pzdChain = Promise.resolve();
   function loadPzd(code){
-    return new Promise((resolve)=>{
-      const t=setTimeout(()=>{ cleanup(); resolve(null); },13000);
+    const run = ()=> new Promise((resolve)=>{
+      let done=false;
+      const t=setTimeout(()=>{ if(done) return; done=true; cleanup(); resolve(null); },12000);
       let sc=null;
       function cleanup(){ clearTimeout(t); if(sc&&sc.parentNode) sc.parentNode.removeChild(sc); }
       sc=document.createElement('script');
-      sc.onload=()=>{ setTimeout(()=>{ try{
+      sc.onload=()=>{ setTimeout(()=>{ if(done) return; done=true; try{
           const nw=window.Data_netWorthTrend, name=window.fS_name;
           const gt=window.Data_grandTotal, bs=window.Data_buySedemption;
           const pos=window.Data_fundSharesPositions;
           cleanup(); resolve({name:name||'', netWorthTrend:nw||[], grandTotal:gt||null, buySed:bs||null, positions:pos||null});
-        }catch(e){ cleanup(); resolve(null); } }, 600); };
-      sc.onerror=()=>{ cleanup(); resolve(null); };
+        }catch(e){ cleanup(); resolve(null); } }, 200); };
+      sc.onerror=()=>{ if(done) return; done=true; cleanup(); resolve(null); };
       sc.src=`https://fund.eastmoney.com/pingzhongdata/${code}.js?_=${Date.now()}`;
       document.head.appendChild(sc);
     });
+    const next = _pzdChain.then(run, run);
+    _pzdChain = next.then(()=>{}, ()=>{});   // 防止链式 reject 阻断后续
+    return next;
+  }
+  // 赛道/个股主题词：剥离基金公司前缀与 ETF/LOF 后缀，用于研报检索（镜像 trend.html fundTheme）
+  function themeOf(name){
+    if(!name) return '';
+    let s=String(name).split('ETF')[0].split('LOF')[0];
+    ['国泰','华夏','易方达','南方','博时','广发','嘉实','天弘','汇添富','银华','招商','华安','富国','鹏华','工银瑞信','建信','中欧','景顺','兴全','交银','东方红','平安','大成','诺安','前海开源','华宝','国联安','申万','兴业','国寿','泰康','永赢','民生','光大','海富通','万家','国投','安信','中银','农银','长城','华泰','浙商','财通','东财','同泰'].forEach(m=>{ s=s.replace(m,''); });
+    return s.trim();
+  }
+  // 研报密度（东方财富研报中心，JSONP 可用；fetch 被 CORS 拦截故走 JSONP）。返回近90天研报篇数，失败时 null。
+  async function fetchResearchCount(keyword){
+    if(!keyword) return null;
+    const end=ymd(new Date()), start=ymd(new Date(Date.now()-90*864e5));
+    const kw=encodeURIComponent(keyword);
+    const cb='rsh'+Math.random().toString(36).slice(2,10);
+    const url=`https://reportapi.eastmoney.com/report/list?pageNo=1&pageSize=1&beginTime=${start}&endTime=${end}&qType=0&keyword=${kw}&cb=${cb}`;
+    try{ const d=await jsonpGet(url, cb); return (d&&d.hits!=null)? d.hits : null; }
+    catch(e){ return null; }
   }
   function navSeries(fund){
     const nw=fund&&fund.netWorthTrend;
@@ -328,6 +354,10 @@
       L4:{isETF,isOCF,net5,total,premium},
       UW:{chip, div, flow, sentiment:null}
     };
+    // 研报密度（主题/个股，JSONP 可用）：仅作 corroboration，非判定门槛
+    const theme=themeOf(res.name);
+    res.research = theme ? await fetchResearchCount(theme) : null;
+    res.dataDate = klines.length ? klines[klines.length-1].date : '';
     res.ok=true;
     return res;
   }
@@ -422,7 +452,11 @@
   async function renderRecap(sectionEl){
     injectCSS();
     if(!sectionEl) return;
-    const wl = (global.STATE && global.STATE.watchlist) || [];
+    const wlRaw = (global.STATE && global.STATE.watchlist) || [];
+    // 去重：同一代码只分析一次（避免自选误加重复项，如两个 000979）
+    const seen={}, items=[]; let dup=0;
+    for(const it of wlRaw){ if(!it||!it.code) continue; if(seen[it.code]){ dup++; continue; } seen[it.code]=1; items.push(it); }
+    const wl=items;
     sectionEl.innerHTML = '<div class="fw-loading">正在生成复盘（自动拉取各标的数据，无需操作）…</div>';
     if(!wl.length){ sectionEl.innerHTML='<div class="fw-empty">自选股为空 —— 先去添加标的，复盘将自动生成。数据来源：腾讯gtimg / 东方财富。</div>'; return; }
     let breadth=null; try{ breadth=await fetchMarketBreadth(); }catch(e){}
@@ -434,6 +468,10 @@
       const rs=await Promise.all(batch.map(it=>analyzeOne(it).catch(e=>({code:it.code, name:it.name||'', asset:'', ok:false, err:''+e}))));
       results.push(...rs);
     }
+    // 数据截至：取首只有效标的的最后一根 K线/净值日期（日线为上一交易日收盘）
+    let lastDate='';
+    for(const r of results){ if(r.ok && r.dataDate){ lastDate=r.dataDate; break; } }
+    if(!lastDate) lastDate=ymd(new Date());
     // 汇总
     let buy=0,hold=0,sell=0;
     const cards=results.map(r=>{
@@ -449,6 +487,7 @@
         if(L.L4.net5!=null) pb.push(badge('净申赎'+L.L4.net5.toFixed(1)+'亿', L.L4.net5>=-5?'good':'bad'));
         if(L.L4.premium!=null) pb.push(badge('折溢价'+L.L4.premium.toFixed(1)+'%', Math.abs(L.L4.premium)<=3?'':(L.L4.premium>0?'warn':'warn')));
       }
+      if(r.research!=null) pb.push(badge('研报'+r.research+'篇', r.research>=20?'good':(r.research<5?'warn':'')));
       const uw=L.UW;
       if(uw.chip&&!uw.chip.na) pb.push(badge('获利盘'+uw.chip.profitRatio.toFixed(0)+'%', uw.chip.profitRatio>=60?'good':(uw.chip.profitRatio<=35?'bad':'')));
       if(uw.flow&&!uw.flow.na) pb.push(badge('主力'+(uw.flow.netY>=0?'+':'')+uw.flow.netY.toFixed(1)+'亿', uw.flow.netY>0?'good':'bad'));
@@ -469,11 +508,11 @@
       <span class="pill fw-pill-buy">建议买入 ${buy}</span>
       <span class="pill fw-pill-hold">观望 ${hold}</span>
       <span class="pill fw-pill-sell">不建议 ${sell}</span>
-      <span style="color:var(--txt2);font-size:12px">共 ${results.length} 只 · 复盘日 ${(wl.__date||'')||ymd(new Date())}</span>
+      <span style="color:var(--txt2);font-size:12px">共 ${results.length} 只 · 数据截至 ${lastDate}${dup?` · 已去重 ${dup} 个重复代码`:''}</span>
       ${sent?`<span class="pill fw-pill-sent">市场情绪：${sent.label}(${sent.score})</span>`:''}
     </div>`;
     sectionEl.innerHTML = `<div class="fw-recap">${summary}<div class="fw-cards">${cards}</div>
-      <div class="fw-src" style="margin-top:12px">说明：建议为框架综合研判结论（四层+水下层），非个性化投资建议；市场情绪为恐惧贪婪代理。报告仅供参考，不构成个人投资建议。</div></div>`;
+      <div class="fw-src" style="margin-top:12px">说明：建议为框架综合研判结论（四层+水下层），非个性化投资建议；市场情绪为恐惧贪婪代理。复盘在打开/刷新页面时基于最新可得数据生成；日K线为上一交易日收盘，盘中实时价仅影响现价与资金流。报告仅供参考，不构成个人投资建议。</div></div>`;
   }
 
   /* ----------------------------- trend.html L5 水下层渲染 ----------------------------- */
