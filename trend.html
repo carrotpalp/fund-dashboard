@@ -612,12 +612,9 @@ async function analyze(){
   const struc=classifyStructure(piv);
   STATE._struc=struc;
 
-  // ---- L2 赔率（价格分位 vs 近52周） ----
-  const win=Math.min(252, closes.length);
-  const slice=closes.slice(closes.length-win);
-  const lo52=Math.min(...slice), hi52=Math.max(...slice);
-  const cur=closes[closes.length-1];
-  const pct=hi52===lo52?50:(cur-lo52)/(hi52-lo52)*100;
+  // ---- L2 赔率（价格分位 vs 近252日，与 AI复盘 valuationPct 同口径：经验分位数） ----
+  const pp=pricePct(klines);
+  const lo52=pp.lo, hi52=pp.hi, cur=pp.cur, pct=pp.pct;
   renderL2(pct, lo52, hi52, cur);
 
   // ---- L3 渲染 ----
@@ -920,14 +917,18 @@ function maxDrawdown(klines){
   for(const v of seg){ if(v>peak) peak=v; const dd=(peak-v)/peak*100; if(dd>mdd) mdd=dd; }
   return +mdd.toFixed(1);
 }
-// 价格分位（近252交易日）
+// 价格分位（近252交易日）—— 与 framework.js valuationPct 同一口径：经验分位数
+// （当前收盘价在过去 win 日收盘价分布中的百分位，非 min-max 线性位置），保证 AI复盘 与 趋势工具 一致
 function pricePct(klines){
   const closes=klines.map(k=>k.close);
   const win=Math.min(252,closes.length);
   const sl=closes.slice(closes.length-win);
   const lo=Math.min(...sl), hi=Math.max(...sl);
-  const pct=hi===lo?50:(closes[closes.length-1]-lo)/(hi-lo)*100;
-  return {pct, lo, hi, tag: pct<35?'低位':pct<75?'中位':'高位'};
+  const cur=sl[sl.length-1];
+  const sorted=sl.slice().sort((a,b)=>a-b);
+  const rank=sorted.filter(x=>x<=cur).length;
+  const pct=hi===lo?50:rank/sorted.length*100;
+  return {pct, lo, hi, cur, tag: pct<35?'低位':pct<75?'中位':'高位'};
 }
 // ETF 折溢价：用盘中 IOPV（腾讯gtimg [78]），杜绝 T-1 净值导致的虚高（曾误显 +5.37%）
 function fetchEtfPremiumGT(code){
