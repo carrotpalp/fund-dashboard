@@ -860,6 +860,7 @@ function computeRAG(pct, struc, macd, closes, ma20, ma60){
 /* ---- 5步复盘清单 ---- */
 /* 语义约定：勾选 = 该项通过（绿灯，可动手）；未勾 = 不通过（红灯，回避）。
    系统已按实时数据自动判定每项勾选/不勾；仅当数据真取不到时才给出手动校验指引。 */
+const RESEARCH_DENSE=8;   // 近90天主题研报 ≥ 此数视为“密集”（② 赛道基本面边际改善的判定条件之一）
 const CHECKS=[
   {
     t:'① 大盘赚钱效应达标：上涨家数占比≥45% 且 涨跌中位数≥+0.1% 且 成交额≥6000亿',
@@ -882,15 +883,23 @@ const CHECKS=[
     n:'数据驱动：价格结构持续性(持续天数/创新高/量能) + 研报数量(尽力)',
     judge:()=>{
       if(!STATE.klines) return 'manual';
-      return sustainSignal(STATE.klines).sustained;
+      const s=sustainSignal(STATE.klines);
+      const structOk=s.sustained;
+      const r=STATE.research;
+      const researchOk = (r&&r.ok) ? (r.count>=RESEARCH_DENSE) : null;   // null=未取到，仅看结构
+      return structOk && (researchOk===null ? true : researchOk);
     },
     evi:()=>{
       if(!STATE.klines) return null;
       const s=sustainSignal(STATE.klines);
-      const verdict = s.sustained ? '偏基本面驱动(数据提示)' : '偏消息/短线刺激(数据提示)';
-      let txt=`持续 ${s.days}交易日 · 创新高 ${s.hh}次 · 量能${s.volUp?'放大✅':'未放大⚠'} → ${verdict}`;
-      if(STATE.research && STATE.research.ok) txt += ` · 研报佐证 ${STATE.research.count}篇（机构关注度，仅作 corroboration）`;
-      txt += '（结构判断已自动完成；研报为补充佐证，非判定门槛。最终确认建议结合产业新闻/订单）';
+      const structOk=s.sustained;
+      let txt=`结构持续 ${s.days}交易日·创新高${s.hh}次·量能${s.volUp?'放大✅':'未放大⚠'} → ${structOk?'满足':'不满足'}`;
+      const r=STATE.research;
+      if(r&&r.ok){ const dense=r.count>=RESEARCH_DENSE; txt+=` · 研报${r.count}篇${dense?'密集✅(满足)':'偏少⚠(不满足“研报密集”)'}`; }
+      else txt+=' · 研报未取到(仅结构判定)';
+      const researchOk = (r&&r.ok)?(r.count>=RESEARCH_DENSE):null;
+      const pass = structOk && (researchOk===null?true:researchOk);
+      txt += ` → 综合：${pass?'✓ 通过(可勾)':'✗ 未通过(不勾)'}（结构为必要条件，研报密集为佐证/必要条件）`;
       return txt;
     }
   },

@@ -358,6 +358,10 @@
     const theme=themeOf(res.name);
     res.research = theme ? await fetchResearchCount(theme) : null;
     res.dataDate = klines.length ? klines[klines.length-1].date : '';
+    const _today = ymd(new Date());
+    // 数据截至 = 最近一个“已完成”交易日：盘中 gtimg 会返回当天未完成 bar（日期=today），
+    // 但收盘类指标基于 T-1 收盘，故 lastBar 为 today 时回退到上一根 bar 的日期。
+    res.dataDateCompleted = (klines.length>=2 && res.dataDate===_today) ? klines[klines.length-2].date : res.dataDate;
     res.ok=true;
     return res;
   }
@@ -432,6 +436,14 @@
   .fw-reason{ font-size:12px; line-height:1.55; color:var(--txt2); margin-top:6px; }
   .fw-reason b{ color:var(--txt); font-weight:600; }
   .fw-src{ font-size:11px; color:var(--txt2); opacity:.7; margin-top:8px; }
+  .fw-chk{ margin-top:8px; border-top:1px dashed var(--border); padding-top:8px; }
+  .fw-chk-row{ display:flex; gap:6px; align-items:baseline; line-height:1.7; font-size:11.5px; }
+  .fw-chk-row .mk{ font-weight:800; flex:none; }
+  .fw-chk-row.ok .mk{ color:#22c55e; }
+  .fw-chk-row.no .mk{ color:#ef4444; }
+  .fw-chk-row.na .mk{ color:var(--txt3); }
+  .fw-chk-row .lb{ color:var(--txt); font-weight:600; flex:none; }
+  .fw-chk-row .rs{ color:var(--txt2); }
   .fw-loading,.fw-empty{ padding:18px; color:var(--txt2); }
   /* trend.html L5 水下层 */
   .uw-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-top:8px; }
@@ -448,6 +460,36 @@
   /* ----------------------------- AI复盘渲染 ----------------------------- */
   function badge(text, cls){ return `<span class="fw-badge ${cls||''}">${text}</span>`; }
   function verdictClass(call){ return call==='建议买入'?'fw-pill-buy':(call==='不建议'?'fw-pill-sell':'fw-pill-hold'); }
+
+  // 研报“密集”阈值：近90天主题研报 ≥ 此数视为机构密集关注（② 赛道基本面边际改善的判定条件之一）
+  const RESEARCH_DENSE = 8;
+
+  // 复盘卡片用的逐项 5 步清单：返回 [{t, pass, na, reason}]，pass/fail 与趋势工具 CHECKS 逻辑一致
+  function fwChecklist(r){
+    const L=r.layers, items=[];
+    const m = global.STATE && global.STATE.market;
+    if(m){ const ok=m.median>=0.1 && m.upPct>=45 && m.totAmt>=6000*1e8;
+      items.push({t:'① 大盘环境', pass:ok, na:false, reason:`中位${m.median>=0?'+':''}${m.median.toFixed(2)}%·涨${m.upPct.toFixed(0)}%·成交${(m.totAmt/1e8).toFixed(0)}亿`}); }
+    else items.push({t:'① 大盘环境', pass:false, na:true, reason:'见顶部全局环境'});
+    const s=L.L2b; const structOk = s? s.sustained : false;
+    const rc = (typeof r.research==='number')? r.research : (r.research&&r.research.count!=null? r.research.count : null);
+    const researchOk = (rc==null)? null : (rc>=RESEARCH_DENSE);
+    const ok2 = structOk && (researchOk===null? true : researchOk);
+    let r2 = `结构持续${structOk?'✓':'✗'}`;
+    if(rc==null) r2+=' · 研报未取到(仅看结构)'; else r2+=` · 研报${rc}篇${researchOk?'密集✓':'偏少✗'}`;
+    items.push({t:'② 赛道基本面', pass:ok2, na:false, reason:r2});
+    const pct=L.L2?L.L2.pct:null;
+    items.push({t:'③ 估值不贵', pass: pct!=null && pct<75, na:false, reason: pct!=null?`分位${pct.toFixed(0)}%`:'—'});
+    const st=L.L3; const ok4 = st? (st.trend==='uptrend'||(st.trend==='mixed'&&st.maBull)) : false;
+    items.push({t:'④ 价格趋势', pass:ok4, na:false, reason: st?({uptrend:'上升',downtrend:'下降',mixed:'震荡'})[st.trend]+(st.maBull?'·均多':'')+(st.maBear?'·均空':'') :'—'});
+    const L4=L.L4;
+    if(L4.isETF||L4.isOCF){
+      const premOk = L4.premium==null||Math.abs(L4.premium)<=3;
+      const netOk = L4.net5==null||L4.net5>=-5;
+      items.push({t:'⑤ 一级市场', pass:premOk&&netOk, na:false, reason:`折溢价${L4.premium!=null?L4.premium.toFixed(1)+'%':'—'}·净申赎${L4.net5!=null?L4.net5.toFixed(1)+'亿':'—'}`});
+    } else items.push({t:'⑤ 一级市场', pass:false, na:true, reason:'个股无此维度'});
+    return items;
+  }
 
   async function renderRecap(sectionEl){
     injectCSS();
@@ -470,7 +512,7 @@
     }
     // 数据截至：取首只有效标的的最后一根 K线/净值日期（日线为上一交易日收盘）
     let lastDate='';
-    for(const r of results){ if(r.ok && r.dataDate){ lastDate=r.dataDate; break; } }
+    for(const r of results){ if(r.ok && r.dataDateCompleted){ lastDate=r.dataDateCompleted; break; } }
     if(!lastDate) lastDate=ymd(new Date());
     // 汇总
     let buy=0,hold=0,sell=0;
@@ -494,6 +536,8 @@
       if(uw.div){ if(uw.div.topDiv) pb.push(badge('顶背离⚠','bad')); if(uw.div.bottomDiv) pb.push(badge('底背离','good')); if(uw.div.abnormalVol) pb.push(badge('异常放量','warn')); }
       const reason = vd.reasons.length ? '<b>理由：</b>'+vd.reasons.join('；') : '';
       const priceTxt = r.price ? (r.price.price!=null? (r.asset==='场外基金'?'单位净值 '+r.price.price.toFixed(4):'现价 '+r.price.price.toFixed(r.price.price<10?3:2)+(r.price.pct?'（'+(r.price.pct>=0?'+':'')+r.price.pct.toFixed(2)+'%）':'')) : '') : '';
+      const chk=fwChecklist(r);
+      const chkHtml=`<div class="fw-chk">`+chk.map(it=>`<div class="fw-chk-row ${it.na?'na':(it.pass?'ok':'no')}"><span class="mk">${it.na?'ℹ':(it.pass?'✓':'✗')}</span><span class="lb">${it.t}</span><span class="rs">${it.reason}</span></div>`).join('')+`</div>`;
       return `<div class="fw-card">
         <div class="hd"><span class="nm">${r.name||r.code}</span><span class="at">${r.asset}</span></div>
         <div class="hd"><span class="cd">${r.code}</span></div>
@@ -501,6 +545,7 @@
         <div class="verdict ${verdictClass(vd.call)}">${vd.call}</div>
         <div class="fw-badges">${pb.join('')}</div>
         <div class="fw-reason">${reason}</div>
+        ${chkHtml}
         <div class="fw-src">序列源：${r.srcInfo||'—'}</div>
       </div>`;
     }).join('');
@@ -552,6 +597,6 @@
     normalizeInput, fetchKline, loadPzd, navSeries, fetchPrice, fetchQuoteFlow, fetchMarketBreadth,
     valuationPct, priceStructure, sustainSignal, parseGrandTotal, totalShares,
     chipDistribution, divergenceSignals, mainForceFlow, sentimentScore,
-    analyzeOne, verdictOf, renderRecap, renderL5, injectCSS
+    analyzeOne, verdictOf, renderRecap, renderL5, injectCSS, fwChecklist
   };
 })(window);
