@@ -109,9 +109,8 @@
     _pzdChain = next.then(()=>{}, ()=>{});   // 防止链式 reject 阻断后续
     return next;
   }
-  // 注：原「研报密集」信号已移除——东方财富 reportapi 的 keyword 参数被服务端忽略（实测 半导体/白酒/医药 均返回 2925），
-  // 而按 code 过滤返回 0，免费接口无法按个股/主题过滤研报篇数。保留该信号会向每只标的填同一个全局数字（误导），
-  // 故 ② 改为纯价格结构判定；如需真实研报密度需付费数据终端。
+  // 研报(分析师评级/研报)按个股拉取：东方财富 reportapi list 接口用 code=个股代码 + qType=0 可按个股过滤
+  // （实测 code=600519 返回 35 篇，首篇即茅台研报），支持 JSONP(cb=) 与 CORS。详见下方 fetchResearch。
   function navSeries(fund){
     const nw=fund&&fund.netWorthTrend;
     if(!nw||!nw.length) return null;
@@ -163,6 +162,53 @@
       const totAmt=arr.reduce((s,x)=>s+(x.f6||0),0);
       return {median, up, dn, total:n, upPct:up/n*100, totAmt, source:host};
     }catch(e){ return null; }
+  }
+
+  // 研报(分析师评级/研报)按个股拉取：东方财富 reportapi list 接口，code=个股6位代码 + qType=0 可按个股过滤
+  // （实测 code=600519 返回 35 篇，首篇即茅台研报）。支持 JSONP(cb=) 与 CORS。
+  async function fetchResearch(code, days=120){
+    try{
+      const end=new Date();
+      const beg=new Date(end.getTime()-days*86400000);
+      const fmt=d=>`${d.getFullYear()}${(''+(d.getMonth()+1)).padStart(2,'0')}${(''+d.getDate()).padStart(2,'0')}`;
+      const url=`https://reportapi.eastmoney.com/report/list?pageSize=20&pageNo=1&beginTime=${fmt(beg)}&endTime=${fmt(end)}&code=${code}&qType=0`;
+      const cb='rcb'+Math.random().toString(36).slice(2);
+      const d=await jsonpGet(url, cb);
+      const data=(d&&d.data)||[]; if(!data.length) return {count:0, ratings:[]};
+      const ratings=data.map(x=>({
+        title:x.title||'', org:x.orgSName||x.orgName||'', rating:x.emRatingName||x.rating_name||'',
+        date:(x.publishDate||'').slice(0,10), change:x.ratingChange
+      }));
+      const cnt=ratings.length;
+      const bull=ratings.filter(r=>/买入|增持|强推|推荐|Outperform|Overweight|买入-A|增持-A/i.test(r.rating)).length;
+      const bear=ratings.filter(r=>/卖出|减持|回避|Underweight|卖出-A|减持-A/i.test(r.rating)).length;
+      const bullPct=cnt? +((bull/cnt)*100).toFixed(0) : 0;
+      return {count:cnt, bull, bear, bullPct, ratings, last:ratings[0]||null};
+    }catch(e){ return {count:0, ratings:[], error:''+e}; }
+  }
+
+  // 主力资金流 / 机构参与度：东方财富 RPT_DMSK_TS_STOCKNEW（datacenter-web，CORS*，按 SECURITY_CODE 过滤）
+  // 返回 PRIME_INFLOW(主力净流入·元)、ORG_PARTICIPATE(机构参与度)、PRIME_COST(主力成本)、RANK、FOCUS
+  async function fetchMainForce(code){
+    try{
+      const url=`https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_DMSK_TS_STOCKNEW&columns=ALL&filter=(SECURITY_CODE="${code}")&pageSize=1&source=WEB&client=WEB`;
+      const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),9000);
+      const r=await fetch(url,{signal:ctrl.signal}); clearTimeout(to);
+      if(!r.ok) return {na:true};
+      const d=await r.json();
+      const row=d&&d.result&&d.result.data&&d.result.data[0];
+      if(!row) return {na:true};
+      return {
+        na:false,
+        netY: +(((row.PRIME_INFLOW||0)/1e8)).toFixed(2),
+        orgParticipate: row.ORG_PARTICIPATE!=null ? +row.ORG_PARTICIPATE.toFixed(3) : null,
+        primeCost: row.PRIME_COST!=null ? +row.PRIME_COST.toFixed(2) : null,
+        rank: row.RANK!=null ? +row.RANK : null,
+        focus: row.FOCUS!=null ? +row.FOCUS.toFixed(1) : null,
+        tradeDate: (row.TRADE_DATE||'').slice(0,10),
+        source:'东财主力参与度'
+      };
+    }catch(e){ return {na:true}; }
   }
 
   /* ----------------------------- L2/L3 指标 ----------------------------- */
@@ -309,6 +355,12 @@
       try{ const q=await fetchQuoteFlow(priceSecid); if(q) flow=mainForceFlow(q); }catch(e){}
       if(price) res.name = price.name||res.name;
     }
+    // 个股：拉取真实「研报」(reportapi 按 code 过滤) 与「主力/机构参与度」(东财 RPT_DMSK_TS_STOCKNEW)
+    let research=null, mainForce=null;
+    if(isStock){
+      try{ research=await fetchResearch(ni.code); }catch(e){}
+      try{ mainForce=await fetchMainForce(ni.code); }catch(e){}
+    }
     let klines=null, srcInfo='';
     if(isOCF && fund){ klines=navSeries(fund); srcInfo='净值历史(pingzhongdata)'; }
     else{
@@ -335,11 +387,18 @@
     }
     const chip=chipDistribution(klines,120);
     const div=divergenceSignals(klines);
+    // 主力资金流：优先用东财「主力参与度」(真实、非零)；个股用 mainForce，基金回退到实时报价 f62
+    let flowOut = (mainForce && !mainForce.na) ? mainForce : (flow || {na:true});
+    if(flowOut && !flowOut.na && price && price.price && flowOut.primeCost){
+      flowOut.priceVsCost = +(price.price/flowOut.primeCost - 1).toFixed(3);
+    }
     res.layers={
       L2:v, L3:ps, L2b:sus,
       L4:{isETF,isOCF,net5,total,premium},
-      UW:{chip, div, flow, sentiment:null}
+      UW:{chip, div, flow:flowOut, sentiment:null}
     };
+    res.research = research;
+    res.mainForce = mainForce;
     res.dataDate = klines.length ? klines[klines.length-1].date : '';
     const _today = ymd(new Date());
     // 数据截至 = 最近一个“已完成”交易日：盘中 gtimg 会返回当天未完成 bar（日期=today），
@@ -366,8 +425,7 @@
       else if(L.L3.trend==='downtrend'){ T=-1; reasons.push('价格创新低、均线空头，趋势向下'); }
       else if(L.L3.maBull){ T=0.5; reasons.push('震荡但均线仍多头'); }
       else if(L.L3.maBear){ T=-0.5; reasons.push('价格均线空头排列，结构偏弱'); }
-      else reasons.push('价格结构震荡（均线无明确方向）');
-    }
+      else reasons.push('价格结构震荡（均线无明确方向）'); }
     if(L.L2b){ if(L.L2b.sustained){ score+=0.5; reasons.push('上涨结构持续'+L.L2b.days+'日且放量，偏基本面驱动'); } else reasons.push('上涨持续性不足(偏短线脉冲)'); }
     if(L.L4.isETF||L.L4.isOCF){
       if(L.L4.premium!=null) reasons.push('折溢价'+L.L4.premium.toFixed(2)+'%'+(Math.abs(L.L4.premium)<=3?'(无套利干扰)':'⚠偏离大'));
@@ -381,16 +439,45 @@
       if(uw.chip.profitRatio>=60){ score+=0.3; reasons.push('获利盘'+uw.chip.profitRatio.toFixed(0)+'%，筹码未松动'); }
       else if(uw.chip.profitRatio<=35){ score-=0.2; reasons.push('获利盘仅'+uw.chip.profitRatio.toFixed(0)+'%，套牢盘重、抛压待释放'); }
     }
+    // 主力资金流 / 机构参与度（个股权威验证维度）
     if(uw.flow && !uw.flow.na){
       if(uw.flow.netY>0){ score+=0.5; F=0.5; reasons.push('主力净流入'+uw.flow.netY.toFixed(2)+'亿'); }
       else if(uw.flow.netY<0){ score-=0.5; F=-0.5; reasons.push('主力净流出'+uw.flow.netY.toFixed(2)+'亿，资金在撤'); }
+      if(uw.flow.orgParticipate!=null){
+        if(uw.flow.orgParticipate>0.5){ score+=0.3; reasons.push('机构参与度'+(uw.flow.orgParticipate*100).toFixed(0)+'%，主力在场'); }
+        else if(uw.flow.orgParticipate<0.35){ score-=0.2; reasons.push('机构参与度'+(uw.flow.orgParticipate*100).toFixed(0)+'%，主力参与度低'); }
+      }
+      if(uw.flow.priceVsCost!=null){
+        if(uw.flow.priceVsCost>0.03){ score+=0.2; reasons.push('现价高于主力成本'+(uw.flow.priceVsCost*100).toFixed(1)+'%，主力浮盈持仓'); }
+        else if(uw.flow.priceVsCost<-0.03){ score-=0.2; reasons.push('现价低于主力成本'+(Math.abs(uw.flow.priceVsCost)*100).toFixed(1)+'%，主力浮亏承压'); }
+      }
     }
     if(uw.div){
       if(uw.div.topDiv){ score-=0.5; reasons.push('量价顶背离，警惕主力派发'); }
       if(uw.div.bottomDiv){ score+=0.5; reasons.push('量价底背离，低位有承接'); }
     }
-    // 硬约束：趋势向下 + 主力流出 → 明确不建议（即便估值低，也不接下落刀）
+    // 研报(分析师共识)：实拉 per-stock，作基本面 corroboration
+    const rs=res.research;
+    if(rs && rs.count>=3){
+      if(rs.bullPct>=60){ score+=0.5; reasons.push('近'+rs.count+'篇研报，'+rs.bullPct+'%买入/增持评级，共识向好'); }
+      else if(rs.bullPct<=30){ score-=0.3; reasons.push('近'+rs.count+'篇研报仅'+rs.bullPct+'%看好，共识偏冷'); }
+      else reasons.push('近'+rs.count+'篇研报，评级中性');
+    } else if(rs && rs.count>0){ reasons.push('近期研报较少('+rs.count+'篇)'); }
+    // 大盘环境(全局)作为顶层校准
+    const mk=global.STATE && global.STATE.market;
+    let riskOff=false, riskOn=false;
+    if(mk){
+      riskOff = mk.median<0 && mk.upPct<45;
+      riskOn = mk.median>0.3 && mk.upPct>55;
+      if(riskOff){ score-=0.5; reasons.push('大盘偏弱(中位'+mk.median.toFixed(2)+'%·涨'+mk.upPct.toFixed(0)+'%)：系统性环境不利，降低风险暴露'); }
+      else if(riskOn){ score+=0.3; reasons.push('大盘偏强(中位'+mk.median.toFixed(2)+'%·涨'+mk.upPct.toFixed(0)+'%)：顺势环境'); }
+    }
+    // 个股权威维度声明：价格趋势(L3)为本体 + 主力资金流(L5)为最终验证与加权
+    const isStock = !(L.L4.isETF||L.L4.isOCF);
+    if(isStock) reasons.unshift('【个股·权威维度】价格趋势(L3)为本体，主力资金流(L5)为最终验证与加权项');
+    // 硬约束：趋势向下 + 主力流出 → 明确不建议（不接下落刀）
     let call = (T<=-0.5 && F<=-0.5) ? '不建议' : (score>=2 ? '建议买入' : '观望');
+    if(riskOff && call==='建议买入' && !(T>=0.5 && F>=0.5)) call='观望';
     return {call, score:+score.toFixed(2), reasons};
   }
 
@@ -434,6 +521,12 @@
   .uw-cell .t{ font-size:11px; color:var(--txt2); margin-bottom:3px; }
   .uw-cell .v{ font-size:13px; font-weight:700; }
   .uw-note{ font-size:11px; color:var(--txt2); opacity:.75; margin-top:6px; line-height:1.5; }
+  .fw-market{ border:1px solid var(--border); border-radius:10px; padding:10px 14px; background:var(--panel2); margin-bottom:12px; }
+  .fw-market .fm-hd{ font-size:12px; color:var(--txt2); margin-bottom:6px; }
+  .fw-market .fm-body{ display:flex; flex-wrap:wrap; gap:14px; align-items:baseline; font-size:13px; }
+  .fw-market .fm-body b{ font-weight:800; }
+  .fw-market .fm-body .up{ color:#ef4444; } .fw-market .fm-body .down{ color:#22c55e; }
+  .fw-market .fm-sub{ color:var(--txt2); font-size:11px; }
   `;
   function injectCSS(){
     if(document.getElementById('fw-style')) return;
@@ -455,7 +548,10 @@
     const volMark = (s&&s.volUp)?'✅':'⚠';
     const daysTxt = s? s.days : 0;
     const hhTxt = s? s.hh : 0;
-    items.push({t:'② 赛道基本面', pass:structOk, na:false, reason:'结构持续'+(structOk?'✓':'✗')+'(持续'+daysTxt+'日·创新高'+hhTxt+'次·放量'+volMark+')；研报密集佐证已剔除(免费接口无法按个股过滤)'});
+    let rsTxt = '结构持续'+(structOk?'✓':'✗')+'(持续'+daysTxt+'日·创新高'+hhTxt+'次·放量'+volMark+')';
+    if(r && r.research && r.research.count>0){ rsTxt += '；研报'+r.research.count+'篇·'+r.research.bullPct+'%买入/增持'; }
+    else { rsTxt += '；研报无覆盖'; }
+    items.push({t:'② 赛道基本面', pass:structOk, na:false, reason:rsTxt});
     const pct=L.L2?L.L2.pct:null;
     items.push({t:'③ 估值不贵', pass: pct!=null && pct<75, na:false, reason: pct!=null?`分位${pct.toFixed(0)}%`:'—'});
     const st=L.L3; const ok4 = st? (st.trend==='uptrend'||(st.trend==='mixed'&&st.maBull)) : false;
@@ -465,7 +561,8 @@
       const premOk = L4.premium==null||Math.abs(L4.premium)<=3;
       const netOk = L4.net5==null||L4.net5>=-5;
       items.push({t:'⑤ 一级市场', pass:premOk&&netOk, na:false, reason:`折溢价${L4.premium!=null?L4.premium.toFixed(1)+'%':'—'}·净申赎${L4.net5!=null?L4.net5.toFixed(1)+'亿':'—'}`});
-    } else items.push({t:'⑤ 一级市场', pass:false, na:true, reason:'个股无此维度'});
+    }
+    // 个股(非基金)无一级市场维度 → 不计入清单、不影响建议
     return items;
   }
 
@@ -481,6 +578,7 @@
     if(!wl.length){ sectionEl.innerHTML='<div class="fw-empty">自选股为空 —— 先去添加标的，复盘将自动生成。数据来源：腾讯gtimg / 东方财富。</div>'; return; }
     let breadth=null; try{ breadth=await fetchMarketBreadth(); }catch(e){}
     const sent=sentimentScore(breadth);
+    global.STATE.market = breadth;   // 大盘环境直接参与每只标的的判定(fwChecklist ① 与 verdictOf)
     const results=[];
     const limit=4;
     for(let i=0;i<wl.length;i+=limit){
@@ -511,6 +609,7 @@
       if(uw.chip&&!uw.chip.na) pb.push(badge('获利盘'+uw.chip.profitRatio.toFixed(0)+'%', uw.chip.profitRatio>=60?'good':(uw.chip.profitRatio<=35?'bad':'')));
       if(uw.flow&&!uw.flow.na) pb.push(badge('主力'+(uw.flow.netY>=0?'+':'')+uw.flow.netY.toFixed(1)+'亿', uw.flow.netY>0?'good':'bad'));
       if(uw.div){ if(uw.div.topDiv) pb.push(badge('顶背离⚠','bad')); if(uw.div.bottomDiv) pb.push(badge('底背离','good')); if(uw.div.abnormalVol) pb.push(badge('异常放量','warn')); }
+      if(r.research && r.research.count>0) pb.push(badge('研报'+r.research.count+'篇·'+r.research.bullPct+'%看好', r.research.bullPct>=60?'good':(r.research.bullPct<=30?'bad':'')));
       const reason = vd.reasons.length ? '<b>理由：</b>'+vd.reasons.join('；') : '';
       const priceTxt = r.price ? (r.price.price!=null? (r.asset==='场外基金'?'单位净值 '+r.price.price.toFixed(4):'现价 '+r.price.price.toFixed(r.price.price<10?3:2)+(r.price.pct?'（'+(r.price.pct>=0?'+':'')+r.price.pct.toFixed(2)+'%）':'')) : '') : '';
       const chk=fwChecklist(r);
@@ -533,18 +632,33 @@
       <span style="color:var(--txt2);font-size:12px">共 ${results.length} 只 · 数据截至 ${lastDate}${dup?` · 已去重 ${dup} 个重复代码`:''}</span>
       ${sent?`<span class="pill fw-pill-sent">市场情绪：${sent.label}(${sent.score})</span>`:''}
     </div>`;
-    sectionEl.innerHTML = `<div class="fw-recap">${summary}<div class="fw-cards">${cards}</div>
+    const mk=breadth;
+    let regimeTxt='中性环境', regimeCls='fw-pill-hold';
+    if(mk){ if(mk.median<0 && mk.upPct<45){ regimeTxt='系统性偏弱·降仓'; regimeCls='fw-pill-sell'; } else if(mk.median>0.3 && mk.upPct>55){ regimeTxt='顺势偏强'; regimeCls='fw-pill-buy'; } }
+    const marketHtml = mk ? `<div class="fw-market">
+      <div class="fm-hd">大盘环境（直接展示，用于校准每只标的的建议）</div>
+      <div class="fm-body">
+        <span>中位涨跌幅 <b class="${mk.median>=0?'up':'down'}">${mk.median>=0?'+':''}${mk.median.toFixed(2)}%</b></span>
+        <span>上涨占比 <b>${mk.upPct.toFixed(0)}%</b> <span class="fm-sub">(${mk.up}/${mk.total})</span></span>
+        <span>成交额 <b>${(mk.totAmt/1e8).toFixed(0)}亿</b></span>
+        ${sent?`<span>情绪 <b>${sent.label}(${sent.score})</b></span>`:''}
+        <span class="pill ${regimeCls}">${regimeTxt}</span>
+      </div></div>` : '';
+    sectionEl.innerHTML = `<div class="fw-recap">${summary}${marketHtml}<div class="fw-cards">${cards}</div>
       <div class="fw-src" style="margin-top:12px">说明：建议为框架综合研判结论（四层+水下层），非个性化投资建议；市场情绪为恐惧贪婪代理。复盘在打开/刷新页面时基于最新可得数据生成；日K线为上一交易日收盘，盘中实时价仅影响现价与资金流。报告仅供参考，不构成个人投资建议。</div></div>`;
   }
 
   /* ----------------------------- trend.html L5 水下层渲染 ----------------------------- */
-  function renderL5(container, klines, quoteFlow){
+  function renderL5(container, klines, opts){
     injectCSS();
     if(!container) return;
     if(!klines){ container.innerHTML='<p class="src">水下层需K线/净值序列，暂未取到。</p>'; return; }
     const chip=chipDistribution(klines,120);
     const div=divergenceSignals(klines);
-    const flow=quoteFlow? mainForceFlow(quoteFlow) : {na:true};
+    // 优先用东财「主力参与度」(真实、非零)；回退到实时报价 f62
+    const flow = (opts && opts.mainForce && !opts.mainForce.na) ? opts.mainForce : (opts && opts.quoteFlow ? mainForceFlow(opts.quoteFlow) : {na:true});
+    if(flow && !flow.na && opts && opts.price && opts.price.price && flow.primeCost){ flow.priceVsCost = +(opts.price.price/flow.primeCost - 1).toFixed(3); }
+    const research = (opts && opts.research && opts.research.count>0) ? opts.research : null;
     const cells=[];
     if(!chip.na){
       const cCls = chip.profitRatio>=60?'good':(chip.profitRatio<=35?'bad':'');
@@ -555,8 +669,11 @@
     if(!flow.na){
       const fCls = flow.netY>0?'good':'bad';
       cells.push(`<div class="uw-cell"><div class="t">主力净流入</div><div class="v" style="color:var(${fCls==='good'?'--up':'--down'})">${flow.netY>=0?'+':''}${flow.netY.toFixed(2)}亿</div></div>`);
-      if(flow.pct!=null) cells.push(`<div class="uw-cell"><div class="t">主力净流入占比</div><div class="v">${flow.pct.toFixed(1)}%</div></div>`);
-    } else { cells.push(`<div class="uw-cell"><div class="t">主力资金流</div><div class="v">不适用</div></div>`); }
+      if(flow.orgParticipate!=null) cells.push(`<div class="uw-cell"><div class="t">机构参与度</div><div class="v">${(flow.orgParticipate*100).toFixed(0)}%</div></div>`);
+      if(flow.primeCost!=null) cells.push(`<div class="uw-cell"><div class="t">主力成本</div><div class="v">${flow.primeCost.toFixed(flow.primeCost<10?3:2)}</div></div>`);
+      if(flow.priceVsCost!=null){ const pc=flow.priceVsCost*100; cells.push(`<div class="uw-cell"><div class="t">现价/主力成本</div><div class="v" style="color:var(${pc>=0?'--up':'--down'})">${pc>=0?'+':''}${pc.toFixed(1)}%</div></div>`); }
+    } else { cells.push(`<div class="uw-cell"><div class="t">主力资金流</div><div class="v">不适用(个股无字段)</div></div>`); }
+    if(research){ const rc=research.bullPct; cells.push(`<div class="uw-cell"><div class="t">研报共识(近${research.count}篇)</div><div class="v" style="color:var(${rc>=60?'--up':rc<=30?'--down':'--txt'})">${rc}%看好</div></div>`); }
     const dtags=[];
     if(div.topDiv) dtags.push('<span class="fw-badge bad">量价顶背离·警惕派发</span>');
     if(div.bottomDiv) dtags.push('<span class="fw-badge good">量价底背离·有承接</span>');
@@ -566,12 +683,13 @@
     if(!dtags.length) dtags.push('<span class="fw-badge">量价无明显异动</span>');
     container.innerHTML = `<div class="uw-grid">${cells.join('')}</div>
       <div class="fw-badges" style="margin-top:8px">${dtags.join('')}</div>
-      <div class="uw-note">水下层为「主力意图/人性博弈」的可量化代理（筹码成本结构、主力资金流、量价背离），揭示表面数据之下的深层博弈，非对主力心思的直接读取。个股主力流可能无字段→标记不适用。</div>`;
+      <div class="uw-note">水下层为「主力意图/人性博弈」的可量化代理（筹码成本结构、主力资金流/机构参与度、量价背离、研报共识），揭示表面数据之下的深层博弈，非对主力心思的直接读取。个股主力流可能无字段→标记不适用。</div>`;
   }
 
   // 导出
   global.FW = {
     normalizeInput, fetchKline, loadPzd, navSeries, fetchPrice, fetchQuoteFlow, fetchMarketBreadth,
+    fetchResearch, fetchMainForce,
     valuationPct, priceStructure, sustainSignal, parseGrandTotal, totalShares,
     chipDistribution, divergenceSignals, mainForceFlow, sentimentScore,
     analyzeOne, verdictOf, renderRecap, renderL5, injectCSS, fwChecklist

@@ -529,6 +529,10 @@ async function analyze(){
   try{ price=await fetchPrice(priceSecid); }catch(e){}
   let quoteFlow=null;
   if(priceSecid && window.FW && window.FW.fetchQuoteFlow){ try{ quoteFlow=await window.FW.fetchQuoteFlow(priceSecid); }catch(e){} }
+  // 个股权威维度：真实主力资金流 + 机构参与度（东财 RPT_DMSK_TS_STOCKNEW；注意 push2delay 的 f62 对个股恒为0）
+  let mainForce=null, research=null;
+  if(isStock && window.FW && window.FW.fetchMainForce){ try{ mainForce=await window.FW.fetchMainForce(ni.code); }catch(e){} }
+  if(isStock && window.FW && window.FW.fetchResearch){ try{ research=await window.FW.fetchResearch(ni.code); }catch(e){} }
   if(isOCF && fund){ const nw=fund.netWorthTrend; if(nw&&nw.length) price={price:nw[nw.length-1].y, prevClose:(nw.length>1?nw[nw.length-2].y:0), pct:0, name:fund.name}; }
   // K线/价格序列源
   if(isOCF){
@@ -541,7 +545,7 @@ async function analyze(){
     }
   }
   try{ STATE.market=await fetchMarketBreadth(); }catch(e){ STATE.market=null; }
-  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.quoteFlow=quoteFlow; STATE.hasK=!!klines; STATE.srcInfo=srcInfo;
+  STATE.klines=klines; STATE.fund=fund; STATE.price=price; STATE.quoteFlow=quoteFlow; STATE.mainForce=mainForce; STATE.research=research; STATE.hasK=!!klines; STATE.srcInfo=srcInfo;
   STATE.l1checks=renderL1(code);
   document.getElementById('rag').innerHTML='';
   document.getElementById('verdict').innerHTML='分析完成';
@@ -594,7 +598,7 @@ async function analyze(){
   renderL4(klines, fund, price);
 
   // ---- L5 水下层（framework.js） ----
-  if(window.FW) FW.renderL5(document.getElementById('l5uw'), klines, quoteFlow);
+  if(window.FW) FW.renderL5(document.getElementById('l5uw'), klines, {mainForce, quoteFlow, research, price});
 
   // ---- RAG + 结论 ----
   computeRAG(pct, struc, macd, closes, ma20, ma60);
@@ -876,7 +880,13 @@ const CHECKS=[
       const ok=s.sustained;
       let txt=`结构持续 ${s.days}交易日(${ok?'≥10✓':'<10✗'})·创新高${s.hh}次(${s.hh>=2?'≥2✓':'<2✗'})·量能${s.volUp?'放大✅':'未放大⚠'} → ${ok?'满足「持续抬升」':'不满足'}`;
       txt += ` → 综合：${ok?'✓ 通过(可勾)':'✗ 未通过(不勾)'}(价格结构为必要条件，偏基本面驱动而非单日脉冲)`;
-      txt += `。注：原含「研报密集」佐证，但免费研报接口无法按个股过滤(实测 keyword 被忽略、code 返回0)，已剔除该不可靠信号。`;
+      txt += '。';
+      if(STATE.research && STATE.research.count>0){
+        txt += `研报佐证：近${STATE.research.count}篇（${STATE.research.bullPct}%买入/增持）`;
+        if(STATE.research.last) txt += `，最新：${STATE.research.last.org}《${STATE.research.last.title}》(${STATE.research.last.date})`;
+      } else {
+        txt += '研报佐证：近120日东财 reportapi 按个股查询无覆盖（或接口临时失败）';
+      }
       return txt;
     }
   },
@@ -970,6 +980,7 @@ function renderChecklist(){
   CHECKS.forEach((c,i)=>{
     let autoVal=null; try{ autoVal=c.judge(); }catch(e){}
     CHK_AUTO[i]=autoVal;
+    if(autoVal==='na') return;   // 个股无一级市场资金维度：整项移除，不展示、不影响结论分母
     const manual=autoVal==='manual';
     const autoChecked=autoVal===true;
     const div=document.createElement('div'); div.className='chk';
@@ -1015,13 +1026,16 @@ function renderChecklist(){
   updateCheckVerdict();
 }
 function updateCheckVerdict(){
+  const boxes=document.querySelectorAll('#checklist input[data-chk]');
+  const total=boxes.length;
   const checked=document.querySelectorAll('#checklist input[data-chk]:checked').length;
+  const gap=total-checked;
   const cv=document.getElementById('checkVerdict');
   let v, col;
-  if(checked>=4){ v='复盘缺口≤1 → 高价值机会，可右侧参与'; col='var(--green)'; }
-  else if(checked>=3){ v='缺口2条 → 观望或小仓博弈'; col='var(--amber)'; }
+  if(gap<=1){ v='复盘缺口≤1 → 高价值机会，可右侧参与'; col='var(--green)'; }
+  else if(gap===2){ v='缺口2条 → 观望或小仓博弈'; col='var(--amber)'; }
   else { v='缺口≥3条 → 坚决观望，不参与'; col='var(--red)'; }
-  cv.innerHTML=`清单结论：<span style="color:${col}">${v}</span><div class="sub">已勾选 ${checked}/5 项。配套四层 RAG 一起看，二者冲突时以价格趋势(L3)为准。</div>`;
+  cv.innerHTML=`清单结论：<span style="color:${col}">${v}</span><div class="sub">已勾选 ${checked}/${total} 项。配套四层 RAG 一起看，二者冲突时以价格趋势(L3)为准。</div>`;
 }
 
 /* ---- 事件 ---- */
