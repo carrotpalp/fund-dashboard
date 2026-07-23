@@ -180,22 +180,31 @@
     const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
     const fields='f2,f3,f6,f12';
     const host='push2delay.eastmoney.com';
-    // 关键坑：东财 clist JSONP 单页最多返回 100 条(pz 参数被忽略，实测 pz=6000/1000 均只回 100)，
-    // 且按 f3(涨跌幅) 降序时首页恰是「涨幅榜前 100」，直接算 upPct 会得 100% 的抽样偏差。
-    // 故分页拉全市场(全A约5542只→56页)，按 f12(代码) 排序保证跨页为无偏抽样，再合并计算真实广度。
-    const PER=100, TOTAL_PAGES=56, BATCH=6; // 控制并发，避免触发限流/连接耗尽
-    const all=[];
-    for(let i=0;i<TOTAL_PAGES;i+=BATCH){
-      const batch=[];
-      for(let pn=i+1; pn<=Math.min(i+BATCH,TOTAL_PAGES); pn++){
+    // 东财 clist 单页最多返回 100 条(pz 被忽略)；fid=f12(代码序)保证跨页为无偏抽样，杜绝「首页=涨幅榜前100」的偏差。
+    const PER=100, BATCH=4;
+    const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+    const all=[]; let total=0;
+    try{
+      const cb='mcb'+Math.random().toString(36).slice(2);
+      const d1=await jsonpGet(`https://${host}/api/qt/clist/get?pn=1&pz=${PER}&po=1&np=1&fltt=2&invt=2&fid=f12&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}`,cb);
+      const diff1=(d1&&d1.data&&d1.data.diff)||[];
+      if(d1&&d1.data&&typeof d1.data.total==='number') total=d1.data.total;
+      if(diff1.length) all.push(...diff1);
+    }catch(e){}
+    const pages=total>0?Math.ceil(total/PER):56; // 动态页数(首屏读 data.total)，不再硬编码56
+    for(let i=1;i<pages;i+=BATCH){
+      const lo=i+1, hi=Math.min(i+BATCH,pages); const batch=[];
+      for(let pn=lo;pn<=hi;pn++){
         const cb='mcb'+Math.random().toString(36).slice(2);
         const url=`https://${host}/api/qt/clist/get?pn=${pn}&pz=${PER}&po=1&np=1&fltt=2&invt=2&fid=f12&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}&_=${Date.now()}`;
         batch.push(jsonpGet(url,cb).then(d=>(d&&d.data&&d.data.diff)||[]).catch(()=>[]));
+        await sleep(40);
       }
       const res=await Promise.allSettled(batch);
       res.forEach(r=>{ const arr=(r.status==='fulfilled'&&r.value)||[]; if(arr&&arr.length) all.push(...arr); });
+      await sleep(60);
     }
-    if(all.length<500) return null; // 拉取过少视为失败
+    if(all.length<2000) return null; // 被限流/拉取过少 → 诚实失败，绝不展示有偏样本(防再出现 +0.10%/424亿)
     const pct=all.map(x=>x.f3).filter(v=>typeof v==='number'&&!isNaN(v)).map(v=>v/100).sort((a,b)=>a-b);
     const n=pct.length;
     if(!n) return null;

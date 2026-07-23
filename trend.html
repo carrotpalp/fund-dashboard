@@ -268,24 +268,44 @@ async function fetchPrice(secid){
 
 /* 大盘赚钱效应：拉全 A股（沪深京）按涨跌幅排序，算中位数 + 涨/跌占比 + 总成交额。
    数据源：直接走 push2delay（与实时价同源，浏览器内已验证可用）；push2 实时端点在浏览器被拦截，不再尝试以免 15s 空等。 */
+/* 大盘赚钱效应：拉全市场(沪深京约5542只)算涨跌中位数+涨/跌占比+总成交额。
+   关键坑(已修)：东财 clist 的 pz 参数被忽略(实测 pz=6000/1000 均只回100条)，且 fid=f3(按涨跌幅排序)首页恰是「涨幅榜前100」→ 只用1页会得到「中位+0.10%·涨100%·成交424亿」的有偏样本。
+   正确做法：分页拉全市场(每页100→56页)，fid=f12(按代码排序=无偏抽样)合并全部；首屏读 data.total 动态算页数；拉取过少(<2000)视为失败返回 null，绝不展示有偏样本。 */
 async function fetchMarketBreadth(){
   const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
   const fields='f2,f3,f6,f12';
-  const pz=6000; // 覆盖全市场(总约5540只)，避免抽样偏差
   const host='push2delay.eastmoney.com';
+  const PER=100, BATCH=4;
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const all=[]; let total=0;
   try{
     const cb='mcb'+Math.random().toString(36).slice(2);
-    const url=`https://${host}/api/qt/clist/get?pn=1&pz=${pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}&_=${Date.now()}`;
-    const d=await jsonpGet(url, cb);
-    const arr=d&&d.data&&d.data.diff;
-    if(!arr||!arr.length) return null;
-    const pct=arr.map(x=>x.f3/100).sort((a,b)=>a-b);
-    const n=pct.length;
-    const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
-    const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length;
-    const totAmt=arr.reduce((s,x)=>s+(x.f6||0),0);
-    return {median, up, dn, total:n, upPct:up/n*100, totAmt, source:host};
-  }catch(e){ return null; }
+    const d1=await jsonpGet(`https://${host}/api/qt/clist/get?pn=1&pz=${PER}&po=1&np=1&fltt=2&invt=2&fid=f12&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}`,cb);
+    const diff1=(d1&&d1.data&&d1.data.diff)||[];
+    if(d1&&d1.data&&typeof d1.data.total==='number') total=d1.data.total;
+    if(diff1.length) all.push(...diff1);
+  }catch(e){}
+  const pages=total>0?Math.ceil(total/PER):56;
+  for(let i=1;i<pages;i+=BATCH){
+    const lo=i+1, hi=Math.min(i+BATCH,pages); const batch=[];
+    for(let pn=lo;pn<=hi;pn++){
+      const cb='mcb'+Math.random().toString(36).slice(2);
+      const url=`https://${host}/api/qt/clist/get?pn=${pn}&pz=${PER}&po=1&np=1&fltt=2&invt=2&fid=f12&fs=${encodeURIComponent(fs)}&fields=${fields}&cb=${cb}&_=${Date.now()}`;
+      batch.push(jsonpGet(url,cb).then(d=>(d&&d.data&&d.data.diff)||[]).catch(()=>[]));
+      await sleep(40);
+    }
+    const res=await Promise.allSettled(batch);
+    res.forEach(r=>{ const arr=(r.status==='fulfilled'&&r.value)||[]; if(arr&&arr.length) all.push(...arr); });
+    await sleep(60);
+  }
+  if(all.length<2000) return null; // 被限流/拉取过少 → 诚实失败，绝不展示有偏样本(防止再出现+0.10%/424亿)
+  const pct=all.map(x=>x.f3).filter(v=>typeof v==='number'&&!isNaN(v)).map(v=>v/100).sort((a,b)=>a-b);
+  const n=pct.length;
+  if(!n) return null;
+  const median=n%2?(pct[(n-1)/2]+pct[(n+1)/2])/2:pct[n/2];
+  const up=pct.filter(x=>x>0).length, dn=pct.filter(x=>x<0).length, flat=n-up-dn;
+  const totAmt=all.reduce((s,x)=>s+(Number(x.f6)||0),0);
+  return {median, up, dn, flat, total:n, upPct:up/n*100, totAmt, source:host};
 }
 
 /* ============ 指标计算 ============ */
