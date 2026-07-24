@@ -4583,6 +4583,65 @@ function parseHoldings(html){
   }
   return out;
 }
+const _holdingsCache = {};      // code -> {date, holdings}
+const _holdingsInflight = {};   // code -> Promise，避免同一基金并发拉取多次
+// 浏览器内获取 fundf10 前十大持仓权重（iframe 内用 fund.eastmoney.com 作 Referer，绕过 fundf10 的 Referer 校验）
+async function getFundHoldingsClient(code){
+  const t = todayStr();
+  const c = _holdingsCache[code];
+  if(c && c.date===t) return c.holdings;
+  if(_holdingsInflight[code]) return _holdingsInflight[code];
+  _holdingsInflight[code] = (async ()=>{
+    try{
+      const holdings = await fetchFundHoldingsIframe(code);
+      _holdingsCache[code] = {date:t, holdings};
+      return holdings;
+    }finally{ delete _holdingsInflight[code]; }
+  })();
+  return _holdingsInflight[code];
+}
+async function fetchFundHoldingsIframe(code){
+  const y = new Date().getFullYear();
+  const quarters = [[y,6],[y,3],[y-1,12],[y-1,9],[y,9],[y,12]];
+  for(const [yy,mm] of quarters){
+    const url = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${encodeURIComponent(code)}&year=${yy}&month=${mm}`;
+    try{
+      const apidata = await new Promise((resolve,reject)=>{
+        const iframe = document.createElement('iframe');
+        iframe.style.display='none';
+        document.body.appendChild(iframe);
+        const to = setTimeout(()=>{ cleanup(); reject(new Error('timeout')); },20000);
+        function cleanup(){ clearTimeout(to); if(iframe.parentNode) iframe.parentNode.removeChild(iframe); }
+        iframe.onload = () => {
+          try{
+            const win = iframe.contentWindow;
+            const doc = win.document;
+            const s = doc.createElement('script');
+            s.onerror = () => { cleanup(); reject(new Error('script error')); };
+            s.src = url;
+            (doc.body||doc.documentElement).appendChild(s);
+            let polls = 0;
+            const iv = setInterval(()=>{
+              polls++;
+              if(win.apidata && win.apidata.content){
+                clearInterval(iv); cleanup(); resolve(win.apidata);
+              }else if(polls > 40){
+                clearInterval(iv); cleanup(); reject(new Error('poll timeout'));
+              }
+            }, 500);
+          }catch(e){ cleanup(); reject(e); }
+        };
+        iframe.onerror = () => { cleanup(); reject(new Error('iframe error')); };
+        iframe.src = `https://fund.eastmoney.com/${encodeURIComponent(code)}.html`;
+      });
+      if(apidata && apidata.content){
+        const h = parseHoldings(apidata.content);
+        if(h.length) return h;
+      }
+    }catch(e){ console.warn('fetchFundHoldingsIframe', code, yy, mm, e.message); }
+  }
+  return [];
+}
 // ============ 场外基金：客户端估算（主力）+ 云端 fund_estimates.json（回退）============
 // 主力：浏览器内直接加载东方财富公开净值数据 pingzhongdata（iframe 跨域、不校验 Referer），
 //   对任意自选场外基金（含 QDII）自动估算/展示，无需 Token、无需把代码同步到仓库、无需本地代理。
@@ -4655,25 +4714,48 @@ async function estimateFundGz(code){
             isToday:(navDate===tday), navDate, gztime:navDate };
         }
         // 盘中且官方未披露 → 自建估算
-        let stockPct = 90;
-        if(pd.sharesPos && pd.sharesPos.length){
-          const sp = pd.sharesPos[pd.sharesPos.length-1];
-          const v = Array.isArray(sp) ? +sp[1] : +sp;
-          if(v>0) stockPct = v;
+        // 优先用 fundf10 前十大真实权重（iframe 内 fund.eastmoney.com 作 Referer，浏览器可达），
+        // 回退到 pingzhongdata stockCodesNew 等权近似。
+        let estChgPct = 0, got = 0, estMethod = 'holdings';
+        const weightedHoldings = await getFundHoldingsClient(code);
+        if(weightedHoldings && weightedHoldings.length){
+          const topWeightSum = weightedHoldings.reduce((a,h)=>a+h.weight,0);
+          const stockPct = topWeightSum / 0.62; // 前十通常占股票仓位 ~62%，与云端 gen_fund_estimate.py 同口径
+          const qs = await Promise.all(weightedHoldings.slice(0,10).map(h=>estQuote(toSecid(h.code))));
+          const valid = [];
+          for(let i=0;i<qs.length;i++){ const q=qs[i]; if(q && q.change_pct!=null && !isNaN(q.change_pct)) valid.push({w:weightedHoldings[i].weight, chg:q.change_pct}); }
+          if(valid.length){
+            const weightedSum = valid.reduce((a,v)=>a+v.w*v.chg,0);
+            const validWeightSum = valid.reduce((a,v)=>a+v.w,0);
+            const wAvg = validWeightSum>0 ? weightedSum/validWeightSum : 0;
+            estChgPct = +((stockPct/100)*wAvg).toFixed(2);
+            got = valid.length;
+            estMethod = 'holdings-weighted';
+          }
         }
-        const secids = (pd.stockCodesNew||[]).filter(s=>/^\d\.\d{6}$/.test(s)).slice(0,10);
-        let wAvg = 0, got = 0;
-        if(secids.length){
-          const qs = await Promise.all(secids.map(s=>estQuote(s)));
-          const valid = qs.filter(q=>q && q.change_pct!=null && !isNaN(q.change_pct));
-          if(valid.length){ wAvg = valid.reduce((a,q)=>a+(q.change_pct||0),0)/valid.length; got = valid.length; }
+        if(!got){
+          // 回退：等权近似
+          let stockPct = 90;
+          if(pd.sharesPos && pd.sharesPos.length){
+            const sp = pd.sharesPos[pd.sharesPos.length-1];
+            const v = Array.isArray(sp) ? +sp[1] : +sp;
+            if(v>0 && v<=100) stockPct = v;
+          }
+          const secids = (pd.stockCodesNew||[]).filter(s=>/^\d\.\d{6}$/.test(s)).slice(0,10);
+          let wAvg = 0;
+          if(secids.length){
+            const qs = await Promise.all(secids.map(s=>estQuote(s)));
+            const valid = qs.filter(q=>q && q.change_pct!=null && !isNaN(q.change_pct));
+            if(valid.length){ wAvg = valid.reduce((a,q)=>a+(q.change_pct||0),0)/valid.length; got = valid.length; }
+          }
+          estChgPct = +((stockPct/100)*wAvg).toFixed(2);
+          estMethod = 'holdings-equal';
         }
-        const estChgPct = +((stockPct/100)*wAvg).toFixed(2);
         const estNav = +(nav*(1+estChgPct/100)).toFixed(4);
         if(got){
           return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), change_pct:estChgPct,
             amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
-            est:true, isOfficial:false, estMethod:'holdings', isQDII:false,
+            est:true, isOfficial:false, estMethod, isQDII:false,
             isToday:true, navDate, gztime:tsToDate(Date.now())+' '+new Date().toLocaleTimeString('zh-CN',{hour12:false}) };
         }
         // 持仓股实时报价取不到 → 降级为官方净值（标注估算暂不可用），保证有数可看
