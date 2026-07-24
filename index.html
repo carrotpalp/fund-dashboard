@@ -5056,11 +5056,13 @@ async function fastCycle(){
     if(isFirst){ isFirst=false; const ov=document.getElementById('loadingOverlay'); ov.style.opacity='0'; setTimeout(()=>ov.style.display='none',400); }
   }catch(e){ console.error('fast cycle', e); }
 }
-async function slowCycle(){
+async function slowCycle(force){
   try{
-    const br = await loadBreadth();
-    if(br) STATE.breadth = br;
-    renderBreadth();
+    if(force || isAshareTradingTime()){
+      const br = await loadBreadth();
+      if(br) STATE.breadth = br;
+      renderBreadth();
+    }
     const nb = await Promise.allSettled([loadNorthbound()]);
     const nbVal = nb[0];
     if(nbVal.status==='fulfilled'){ STATE.northbound = nbVal.value; renderNorthbound(nbVal.value); }
@@ -5361,14 +5363,14 @@ renderSignalSectors();
 renderWatchlist();      // 立即渲染已保存的自选股（避免在1s刷新前看起来"消失"）
   refreshWatchlist();     // 立即拉取行情
   fastCycle();
-  slowCycle();
+  slowCycle(true);
   startTimers();
   initPanelResize();
 try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener('click', resetPanelLayout); }catch(e){ console.error('resetLayout',e); }
 </script>
 
 <!-- AI复盘 引擎（四层框架 + 水下层，共享于 trend.html L5） -->
-<script src="framework.js?v=202607241729"></script>
+<script>document.write('<script src="framework.js?_='+Date.now()+'"><\/script>');</script>
 <script>
   (function(){
     function go(){ try{ if(window.FW) FW.renderRecap(document.getElementById('aiRecap')); }catch(e){ console.error('recap',e); } }

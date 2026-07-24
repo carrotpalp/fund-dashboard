@@ -183,26 +183,14 @@
     const hm=now.getHours()*100+now.getMinutes();
     return (hm>=930&&hm<=1130)||(hm>=1300&&hm<=1500);
   }
-  // 大盘广度：交易时段优先实时(与首页上方市场广度同口径，中位数+成交额实时)；非交易时段数据已冻结→用 T-1 快照，避免无谓实时拉取
+  // 大盘广度：收盘后也优先取实时——push2delay 收盘后返回的就是「今日收盘价」，
+  // 因此交易时段/已收盘/周末节假日 都先尝试实时(拿到当日已定格数据)；仅当实时拉取失败/样本过少时才降级到 T-1 快照。
   async function fetchMarketBreadth(){
-    if(isAshareTradingTime()){
-      try{
-        const live = await fetchMarketBreadthLive();
-        if(live && live.total>=2000) return Object.assign({}, live, {source:'实时·东财push2delay', live:true, fresh:true});
-      }catch(e){}
-      // 实时失败(限流/网络) → 降级回 T-1 快照，不卡白
-    }else{
-      try{
-        const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
-        if(r.ok){
-          const j = await r.json();
-          if(j && typeof j.median==='number' && j.total>=2000)
-            return Object.assign({}, j, {source:'snapshot·'+(j.source||'eastmoney'), fresh:false, snapshotAt:j.generatedAt});
-        }
-      }catch(e){}
-      return null;
-    }
-    // 交易时段实时拉取失败才走快照兜底
+    try{
+      const live = await fetchMarketBreadthLive();
+      if(live && live.total>=2000) return Object.assign({}, live, {source:'实时·东财push2delay', live:true, fresh:true});
+    }catch(e){}
+    // 实时失败(限流/网络/接口异常) → 降级回 T-1 快照，不卡白
     try{
       const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
       if(r.ok){
@@ -802,15 +790,24 @@
     if(_marketTimer) return;
     const tick=async ()=>{
       if(_marketRefreshing) return;
-      if(!isAshareTradingTime()){ clearInterval(_marketTimer); _marketTimer=null; return; } // 盘后停止刷新
-      _marketRefreshing=true;
-      try{
-        const b=await fetchMarketBreadth();
-        if(b){ global.STATE.market=b; updateMarketBox(); }
-      }catch(e){} finally{ _marketRefreshing=false; }
+      if(isAshareTradingTime()){
+        _marketRefreshing=true;
+        try{
+          const b=await fetchMarketBreadth();
+          if(b){ global.STATE.market=b; updateMarketBox(); }
+        }catch(e){} finally{ _marketRefreshing=false; }
+      }else{
+        clearInterval(_marketTimer); _marketTimer=null;
+        // 收盘后补一次实时快照，锁定今日收盘数据（不必持续刷新）
+        _marketRefreshing=true;
+        try{
+          const b=await fetchMarketBreadth();
+          if(b){ global.STATE.market=b; updateMarketBox(); }
+        }catch(e){} finally{ _marketRefreshing=false; }
+      }
     };
     tick();
-    _marketTimer=setInterval(tick, 30000); // 与首页上方市场广度同频(30s)
+    _marketTimer=setInterval(tick, 30000); // 交易时段与首页上方市场广度同频(30s)；收盘后补一次即停
   }
 
   /* ----------------------------- trend.html L5 水下层渲染 ----------------------------- */
