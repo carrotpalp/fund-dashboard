@@ -56,13 +56,6 @@ body{font-family:var(--sans);background-color:var(--bg-main);color:var(--text-1)
 .hdr-live.ok{color:var(--up)} .hdr-live.stale{color:var(--amber)}
 .dash-title{justify-self:start}
 .dash-header-r{justify-self:end;justify-content:flex-end}
-/* Tool nav — 顶部工具导航（可扩展） */
-.tool-nav{display:inline-flex;align-items:center;gap:4px;background:rgb(from var(--bg-panel2) r g b /.6);border:1px solid var(--border);border-radius:999px;padding:4px}
-.tool-link{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text-2);text-decoration:none;transition:background .15s,color .15s,border-color .15s;border:1px solid transparent;white-space:nowrap}
-.tool-link:hover{background:var(--bg-hover);color:var(--text-1);border-color:var(--border-light)}
-.tool-link.active{background:rgb(from var(--accent) r g b /.15);color:var(--accent);border-color:rgb(from var(--accent) r g b /.35)}
-.tool-link .tool-icon{font-size:13px;line-height:1}
-@media(max-width:760px){.tool-link{padding:5px 8px}.tool-link .tool-label{display:none}}
 /* Theme toggle & accent picker */
 .theme-bar{display:inline-flex;align-items:center;gap:8px;margin-left:6px;vertical-align:middle}
 .theme-btn{width:36px;height:20px;border-radius:10px;background:var(--text-3);position:relative;cursor:pointer;border:1px solid var(--border);transition:background .2s;flex:none}
@@ -651,12 +644,6 @@ html.light .theme-btn::after{content:'☀️';left:16px}
         </label>
       </span>
       <button id="resetLayout" class="layout-reset-btn" title="恢复面板默认尺寸（清空手动拖拽/缩放）">重置布局</button>
-      <nav class="tool-nav" aria-label="工具导航">
-        <a class="tool-link active" href="trend.html" target="_blank" rel="noopener" title="四层趋势框架 · ETF/个股趋势判断">
-          <span class="tool-icon">📈</span>
-          <span class="tool-label">趋势判断</span>
-        </a>
-      </nav>
       <span id="headerRight"></span>
     </div>
   </header>
@@ -814,15 +801,6 @@ html.light .theme-btn::after{content:'☀️';left:16px}
     </div>
   </div>
 
-  <!-- Row 3.6: AI 复盘（四层框架 + 水下层，收盘后自动生成，明确建议） -->
-  <div class="gr r2">
-    <div class="panel" style="border-color:var(--accent,#4ea1ff)">
-      <div class="ph"><span class="pt">🤖 AI 复盘 <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">自动生成 · 四层框架 + 水下层(主力意图/人性博弈代理) · 明确建议</span></span>
-        <span class="ps"><button id="recapBtn" class="wl-io-btn" title="重新拉取全部自选股生成复盘">重新生成</button></span></div>
-      <div class="pb"><div id="aiRecap"><div class="fw-loading">正在生成复盘（自动拉取各标的数据，无需操作）…</div></div></div>
-    </div>
-  </div>
-
   <!-- Row 4: Signals -->
   <div class="panel rec-panel">
     <div class="ph"><span class="pt">重要信号与异动监控</span><span class="ps">仅推送规则强度≥0.8 的可执行信号（大盘 / 行业 / 自选个股及ETF），实时源优先</span></div>
@@ -933,7 +911,6 @@ const STATE = {
   mainFlow:null, etfFlow:null, etfRealtimeInflow:null,
   northbound:null, southbound:null, breadthHistory:[], sectorMode:'net', sectorFlowHist:null
 };
-window.STATE = STATE;   // 暴露给 framework.js（AI复盘读取自选股）
 let fastMs = 1000;
 // 实时代理：留空则直连东财/腾讯；若你运行了 proxy_server.py（单文件、标准库、无依赖、CORS*），
 // 把它设为该服务地址（如 http://你的IP:8899 ），页面即走服务端实时代理，广度/行业/北向不再滞后。
@@ -2621,11 +2598,15 @@ function renderHeader(){
   const sessLabel = SESSION_LABEL[sess]||sess;
   const badge = trading ? `<span class="live-up"><span class="live-dot"></span>${sessLabel}</span>` : `<span style="color:var(--text-3)">${sessLabel}</span>`;
   const now = new Date().toLocaleString('zh-CN',{hour12:false});
+  const hasIdx = STATE.indices && Object.keys(STATE.indices).length;
+  const liveOk = (Date.now()-lastLiveTs < 90000);
+  const liveTxt = hasIdx ? (liveOk?'<span class="live-ok">● 实时</span>':'<span class="live-stale">○ 实时源受限·信号可能滞后</span>') : '';
   const sessCls = trading ? 'is-open' : 'is-closed';
-  // 注：原 headerRight 右侧的“● 实时”字样已移除（用户反馈无用、与“早盘交易中”状态重复）
+  const liveHtml = hasIdx ? (liveOk ? '<span class="hdr-live ok">● 实时</span>' : '<span class="hdr-live stale">○ 实时源受限·信号可能滞后</span>') : '';
   document.getElementById('headerRight').innerHTML =
     `<span class="hdr-time">${now}</span>`+
-    `<span class="hdr-session ${sessCls}"><span class="dot"></span>${sessLabel}</span>`;
+    `<span class="hdr-session ${sessCls}"><span class="dot"></span>${sessLabel}</span>`+
+    liveHtml;
   document.getElementById('footerLeft').textContent = `数据更新：${now} | 本仪表盘仅供参考，不构成个人投资建议`;
 }
 function renderIndices(){
@@ -3576,7 +3557,7 @@ function fundTag(q){
   const d = (q.navDate||'').slice(5);                 // MM-DD
   if(q.isQDII && q.est && d) return '<span class="wl-est">估·'+d+'</span>';            // QDII 盘中估算：标注相对净值日期（多滞后到上一交易日）
   if(q.isQDII && q.isOfficial && !q.isToday && d) return '<span class="wl-est">官方·'+d+'</span>'; // QDII 官方净值滞后：标注其真实披露日期
-  if(q.est && (q.estMethod==='holdings'||q.estMethod==='holdings-weighted'||q.estMethod==='holdings-equal')) return '<span class="wl-est">估</span>';  // 自建持仓估算（按 fundf10 实际权重加权；替代已下线的天天基金接口）
+  if(q.est && q.estMethod==='holdings') return '<span class="wl-est">估</span>';  // 自建持仓估算（替代已下线的天天基金接口）
   if(q.est) return '<span class="wl-est">估</span>';
   return '';
 }
@@ -4583,65 +4564,6 @@ function parseHoldings(html){
   }
   return out;
 }
-const _holdingsCache = {};      // code -> {date, holdings}
-const _holdingsInflight = {};   // code -> Promise，避免同一基金并发拉取多次
-// 浏览器内获取 fundf10 前十大持仓权重（iframe 内用 fund.eastmoney.com 作 Referer，绕过 fundf10 的 Referer 校验）
-async function getFundHoldingsClient(code){
-  const t = todayStr();
-  const c = _holdingsCache[code];
-  if(c && c.date===t) return c.holdings;
-  if(_holdingsInflight[code]) return _holdingsInflight[code];
-  _holdingsInflight[code] = (async ()=>{
-    try{
-      const holdings = await fetchFundHoldingsIframe(code);
-      _holdingsCache[code] = {date:t, holdings};
-      return holdings;
-    }finally{ delete _holdingsInflight[code]; }
-  })();
-  return _holdingsInflight[code];
-}
-async function fetchFundHoldingsIframe(code){
-  const y = new Date().getFullYear();
-  const quarters = [[y,6],[y,3],[y-1,12],[y-1,9],[y,9],[y,12]];
-  for(const [yy,mm] of quarters){
-    const url = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${encodeURIComponent(code)}&year=${yy}&month=${mm}`;
-    try{
-      const apidata = await new Promise((resolve,reject)=>{
-        const iframe = document.createElement('iframe');
-        iframe.style.display='none';
-        document.body.appendChild(iframe);
-        const to = setTimeout(()=>{ cleanup(); reject(new Error('timeout')); },20000);
-        function cleanup(){ clearTimeout(to); if(iframe.parentNode) iframe.parentNode.removeChild(iframe); }
-        iframe.onload = () => {
-          try{
-            const win = iframe.contentWindow;
-            const doc = win.document;
-            const s = doc.createElement('script');
-            s.onerror = () => { cleanup(); reject(new Error('script error')); };
-            s.src = url;
-            (doc.body||doc.documentElement).appendChild(s);
-            let polls = 0;
-            const iv = setInterval(()=>{
-              polls++;
-              if(win.apidata && win.apidata.content){
-                clearInterval(iv); cleanup(); resolve(win.apidata);
-              }else if(polls > 40){
-                clearInterval(iv); cleanup(); reject(new Error('poll timeout'));
-              }
-            }, 500);
-          }catch(e){ cleanup(); reject(e); }
-        };
-        iframe.onerror = () => { cleanup(); reject(new Error('iframe error')); };
-        iframe.src = `https://fund.eastmoney.com/${encodeURIComponent(code)}.html`;
-      });
-      if(apidata && apidata.content){
-        const h = parseHoldings(apidata.content);
-        if(h.length) return h;
-      }
-    }catch(e){ console.warn('fetchFundHoldingsIframe', code, yy, mm, e.message); }
-  }
-  return [];
-}
 // ============ 场外基金：客户端估算（主力）+ 云端 fund_estimates.json（回退）============
 // 主力：浏览器内直接加载东方财富公开净值数据 pingzhongdata（iframe 跨域、不校验 Referer），
 //   对任意自选场外基金（含 QDII）自动估算/展示，无需 Token、无需把代码同步到仓库、无需本地代理。
@@ -4714,48 +4636,25 @@ async function estimateFundGz(code){
             isToday:(navDate===tday), navDate, gztime:navDate };
         }
         // 盘中且官方未披露 → 自建估算
-        // 优先用 fundf10 前十大真实权重（iframe 内 fund.eastmoney.com 作 Referer，浏览器可达），
-        // 回退到 pingzhongdata stockCodesNew 等权近似。
-        let estChgPct = 0, got = 0, estMethod = 'holdings';
-        const weightedHoldings = await getFundHoldingsClient(code);
-        if(weightedHoldings && weightedHoldings.length){
-          const topWeightSum = weightedHoldings.reduce((a,h)=>a+h.weight,0);
-          const stockPct = topWeightSum / 0.62; // 前十通常占股票仓位 ~62%，与云端 gen_fund_estimate.py 同口径
-          const qs = await Promise.all(weightedHoldings.slice(0,10).map(h=>estQuote(toSecid(h.code))));
-          const valid = [];
-          for(let i=0;i<qs.length;i++){ const q=qs[i]; if(q && q.change_pct!=null && !isNaN(q.change_pct)) valid.push({w:weightedHoldings[i].weight, chg:q.change_pct}); }
-          if(valid.length){
-            const weightedSum = valid.reduce((a,v)=>a+v.w*v.chg,0);
-            const validWeightSum = valid.reduce((a,v)=>a+v.w,0);
-            const wAvg = validWeightSum>0 ? weightedSum/validWeightSum : 0;
-            estChgPct = +((stockPct/100)*wAvg).toFixed(2);
-            got = valid.length;
-            estMethod = 'holdings-weighted';
-          }
+        let stockPct = 90;
+        if(pd.sharesPos && pd.sharesPos.length){
+          const sp = pd.sharesPos[pd.sharesPos.length-1];
+          const v = Array.isArray(sp) ? +sp[1] : +sp;
+          if(v>0) stockPct = v;
         }
-        if(!got){
-          // 回退：等权近似
-          let stockPct = 90;
-          if(pd.sharesPos && pd.sharesPos.length){
-            const sp = pd.sharesPos[pd.sharesPos.length-1];
-            const v = Array.isArray(sp) ? +sp[1] : +sp;
-            if(v>0 && v<=100) stockPct = v;
-          }
-          const secids = (pd.stockCodesNew||[]).filter(s=>/^\d\.\d{6}$/.test(s)).slice(0,10);
-          let wAvg = 0;
-          if(secids.length){
-            const qs = await Promise.all(secids.map(s=>estQuote(s)));
-            const valid = qs.filter(q=>q && q.change_pct!=null && !isNaN(q.change_pct));
-            if(valid.length){ wAvg = valid.reduce((a,q)=>a+(q.change_pct||0),0)/valid.length; got = valid.length; }
-          }
-          estChgPct = +((stockPct/100)*wAvg).toFixed(2);
-          estMethod = 'holdings-equal';
+        const secids = (pd.stockCodesNew||[]).filter(s=>/^\d\.\d{6}$/.test(s)).slice(0,10);
+        let wAvg = 0, got = 0;
+        if(secids.length){
+          const qs = await Promise.all(secids.map(s=>estQuote(s)));
+          const valid = qs.filter(q=>q && q.change_pct!=null && !isNaN(q.change_pct));
+          if(valid.length){ wAvg = valid.reduce((a,q)=>a+(q.change_pct||0),0)/valid.length; got = valid.length; }
         }
+        const estChgPct = +((stockPct/100)*wAvg).toFixed(2);
         const estNav = +(nav*(1+estChgPct/100)).toFixed(4);
         if(got){
           return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), change_pct:estChgPct,
             amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
-            est:true, isOfficial:false, estMethod, isQDII:false,
+            est:true, isOfficial:false, estMethod:'holdings', isQDII:false,
             isToday:true, navDate, gztime:tsToDate(Date.now())+' '+new Date().toLocaleTimeString('zh-CN',{hour12:false}) };
         }
         // 持仓股实时报价取不到 → 降级为官方净值（标注估算暂不可用），保证有数可看
@@ -5365,17 +5264,6 @@ renderWatchlist();      // 立即渲染已保存的自选股（避免在1s刷新
   startTimers();
   initPanelResize();
 try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener('click', resetPanelLayout); }catch(e){ console.error('resetLayout',e); }
-</script>
-
-<!-- AI复盘 引擎（四层框架 + 水下层，共享于 trend.html L5） -->
-<script src="framework.js?v=202607231840"></script>
-<script>
-  (function(){
-    function go(){ try{ if(window.FW) FW.renderRecap(document.getElementById('aiRecap')); }catch(e){ console.error('recap',e); } }
-    if(document.readyState!=='loading') setTimeout(go,400);
-    else document.addEventListener('DOMContentLoaded', function(){ setTimeout(go,400); });
-    var b=document.getElementById('recapBtn'); if(b) b.onclick=go;
-  })();
 </script>
 </body>
 </html>
