@@ -176,8 +176,33 @@
       }catch(e){ resolve(null); }
     });
   }
-  // 大盘广度：优先用预生成快照(服务器算好→浏览器零分页零限流)，兜底才实时分页
+  // 交易时段判定（与看板首页同源逻辑）：周一~周五 09:30-11:30 / 13:00-15:00
+  function isAshareTradingTime(){
+    const now=new Date(); const day=now.getDay();
+    if(day===0||day===6) return false;
+    const hm=now.getHours()*100+now.getMinutes();
+    return (hm>=930&&hm<=1130)||(hm>=1300&&hm<=1500);
+  }
+  // 大盘广度：交易时段优先实时(与首页上方市场广度同口径，中位数+成交额实时)；非交易时段数据已冻结→用 T-1 快照，避免无谓实时拉取
   async function fetchMarketBreadth(){
+    if(isAshareTradingTime()){
+      try{
+        const live = await fetchMarketBreadthLive();
+        if(live && live.total>=2000) return Object.assign({}, live, {source:'实时·东财push2delay', live:true, fresh:true});
+      }catch(e){}
+      // 实时失败(限流/网络) → 降级回 T-1 快照，不卡白
+    }else{
+      try{
+        const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
+        if(r.ok){
+          const j = await r.json();
+          if(j && typeof j.median==='number' && j.total>=2000)
+            return Object.assign({}, j, {source:'snapshot·'+(j.source||'eastmoney'), fresh:false, snapshotAt:j.generatedAt});
+        }
+      }catch(e){}
+      return null;
+    }
+    // 交易时段实时拉取失败才走快照兜底
     try{
       const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
       if(r.ok){
@@ -188,7 +213,7 @@
         }
       }
     }catch(e){}
-    return fetchMarketBreadthLive();
+    return null;
   }
   async function fetchMarketBreadthLive(){
     const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
@@ -726,7 +751,7 @@
     const mk=breadth;
     let regimeTxt='中性环境', regimeCls='fw-pill-hold';
     if(mk){ if(mk.median<0 && mk.upPct<45){ regimeTxt='系统性偏弱·降仓'; regimeCls='fw-pill-sell'; } else if(mk.upPct>=55 && mk.median>0){ regimeTxt='顺势偏强'; regimeCls='fw-pill-buy'; } }
-    const marketHtml = mk ? `<div class="fw-market">
+    const marketHtml = mk ? `<div class="fw-market" id="fwMarketBox">
       <div class="fm-hd">大盘环境（直接展示，用于校准每只标的的建议${mk.snapshotAt?(' · 数据 '+mk.snapshotAt.slice(0,10)):''}）</div>
       <div class="fm-body">
         <span>中位涨跌幅 <b class="${mk.median>=0?'up':'down'}">${mk.median>=0?'+':''}${(mk.median*100).toFixed(2)}%</b></span>
@@ -746,6 +771,46 @@
       </div></details>`;
     sectionEl.innerHTML = `<div class="fw-recap">${summary}${marketHtml}${legendHtml}<div class="fw-cards">${cards}</div>
       <div class="fw-src" style="margin-top:12px">说明：建议为框架综合研判结论（四层+水下层），非个性化投资建议；市场情绪为恐惧贪婪代理。复盘在打开/刷新页面时基于最新可得数据生成；日K线为上一交易日收盘，盘中实时价仅影响现价与资金流。报告仅供参考，不构成个人投资建议。</div></div>`;
+    startMarketLive(); // 交易时段让 ① 大盘环境(顶部盒)随首页同频(30s)实时刷新；盘后自动停
+  }
+  // ① 大盘环境盒实时刷新（仅更新顶部盒，不重算各标卡片，避免无谓请求）
+  function marketBoxHtml(mk, sent){
+    if(!mk) return '';
+    let regimeTxt='中性环境', regimeCls='fw-pill-hold';
+    if(mk.median<0 && mk.upPct<45){ regimeTxt='系统性偏弱·降仓'; regimeCls='fw-pill-sell'; }
+    else if(mk.upPct>=55 && mk.median>0){ regimeTxt='顺势偏强'; regimeCls='fw-pill-buy'; }
+    return `<div class="fw-market" id="fwMarketBox">
+      <div class="fm-hd">大盘环境${mk.live?' · <span style="color:var(--up)">实时</span>':''}${mk.snapshotAt?(' · 数据 '+mk.snapshotAt.slice(0,10)):''}</div>
+      <div class="fm-body">
+        <span>中位涨跌幅 <b class="${mk.median>=0?'up':'down'}">${mk.median>=0?'+':''}${(mk.median*100).toFixed(2)}%</b></span>
+        <span>上涨占比 <b>${mk.upPct.toFixed(0)}%</b> <span class="fm-sub">(${mk.up}/${mk.total})</span></span>
+        <span>成交额 <b>${(mk.totAmt/1e8).toFixed(0)}亿</b></span>
+        ${sent?`<span>情绪 <b>${sent.label}(${sent.score})</b></span>`:''}
+        <span class="pill ${regimeCls}">${regimeTxt}</span>
+      </div></div>`;
+  }
+  let _marketTimer=null, _marketRefreshing=false;
+  function updateMarketBox(){
+    const box=document.getElementById('fwMarketBox');
+    if(!box) return;
+    const mk=global.STATE.market;
+    if(!mk) return;
+    const sent=sentimentScore(mk);
+    box.outerHTML = marketBoxHtml(mk, sent);
+  }
+  function startMarketLive(){
+    if(_marketTimer) return;
+    const tick=async ()=>{
+      if(_marketRefreshing) return;
+      if(!isAshareTradingTime()){ clearInterval(_marketTimer); _marketTimer=null; return; } // 盘后停止刷新
+      _marketRefreshing=true;
+      try{
+        const b=await fetchMarketBreadth();
+        if(b){ global.STATE.market=b; updateMarketBox(); }
+      }catch(e){} finally{ _marketRefreshing=false; }
+    };
+    tick();
+    _marketTimer=setInterval(tick, 30000); // 与首页上方市场广度同频(30s)
   }
 
   /* ----------------------------- trend.html L5 水下层渲染 ----------------------------- */

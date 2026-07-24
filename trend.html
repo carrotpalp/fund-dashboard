@@ -271,8 +271,33 @@ async function fetchPrice(secid){
 /* 大盘赚钱效应：拉全市场(沪深京约5542只)算涨跌中位数+涨/跌占比+总成交额。
    关键坑(已修)：东财 clist 的 pz 参数被忽略(实测 pz=6000/1000 均只回100条)，且 fid=f3(按涨跌幅排序)首页恰是「涨幅榜前100」→ 只用1页会得到「中位+0.10%·涨100%·成交424亿」的有偏样本。
    正确做法：分页拉全市场(每页100→56页)，fid=f12(按代码排序=无偏抽样)合并全部；首屏读 data.total 动态算页数；拉取过少(<2000)视为失败返回 null，绝不展示有偏样本。 */
-// 大盘广度：优先用预生成快照(服务器算好→浏览器零分页零限流)，兜底才实时分页
+// 交易时段判定（与看板首页同源逻辑）：周一~周五 09:30-11:30 / 13:00-15:00
+function isAshareTradingTime(){
+  const now=new Date(); const day=now.getDay();
+  if(day===0||day===6) return false;
+  const hm=now.getHours()*100+now.getMinutes();
+  return (hm>=930&&hm<=1130)||(hm>=1300&&hm<=1500);
+}
+// 大盘广度：交易时段优先实时(与首页上方市场广度同口径，中位数+成交额实时)；非交易时段数据已冻结→用 T-1 快照，避免无谓实时拉取
 async function fetchMarketBreadth(){
+  if(isAshareTradingTime()){
+    try{
+      const live = await fetchMarketBreadthLive();
+      if(live && live.total>=2000) return Object.assign({}, live, {source:'实时·东财push2delay', live:true, fresh:true});
+    }catch(e){}
+    // 实时失败(限流/网络) → 降级回 T-1 快照，不卡白
+  }else{
+    try{
+      const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
+      if(r.ok){
+        const j = await r.json();
+        if(j && typeof j.median==='number' && j.total>=2000)
+          return Object.assign({}, j, {source:'snapshot·'+(j.source||'eastmoney'), fresh:false, snapshotAt:j.generatedAt});
+      }
+    }catch(e){}
+    return null;
+  }
+  // 交易时段实时拉取失败才走快照兜底
   try{
     const r = await fetch('breadth.json?_='+Date.now(), {cache:'no-store'});
     if(r.ok){
@@ -283,7 +308,7 @@ async function fetchMarketBreadth(){
       }
     }
   }catch(e){}
-  return fetchMarketBreadthLive();
+  return null;
 }
 async function fetchMarketBreadthLive(){
   const fs='m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23';
@@ -469,34 +494,40 @@ const L1_PROFILE={
     ]
   }
 };
+function buildMarketBoxHtml(m){
+  if(!m){
+    return `<div id="marketBox" style="border:1px solid var(--amber);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
+      <div style="color:var(--amber);font-size:12px">⚠ 大盘广度数据获取失败</div>
+      <div class="src" style="margin-top:4px;line-height:1.6">📌 如何校验：东方财富/同花顺看「上涨家数占比≥45%」+「个股涨跌中位数≥+0.1%」+「全市场成交额≥6000亿」→ 满足则大盘环境友好，可勾。</div>
+    </div>`;
+  }
+  const ok=m.median>=0.001 && m.upPct>=45 && m.totAmt>=6000*1e8;
+  const col=ok?'var(--green)':'var(--red)';
+  const verdict=ok?'✓ 环境友好（通过·可勾）':'✗ 环境偏弱（不通过·不勾）';
+  const why=ok
+    ? '中位数转正、涨多跌少、成交活跃 → 系统性环境利于个股表现，可放宽选股条件。'
+    : '中位数偏弱 / 涨少跌多 / 成交低迷 → 系统性风险偏大，宜控仓、只做最强结构。';
+  const tag=m.live?' · <span style="color:var(--up)">实时</span>':(m.fresh===false?' · 偏旧':'');
+  return `<div id="marketBox" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
+    <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">大盘赚钱效应（自动 · 全市场${m.total}只 · <span class="src">${m.source}${m.snapshotAt?(' · '+m.snapshotAt.slice(0,10)):''}${tag}</span>）</div>
+    <div class="kv"><span class="k">涨跌中位数</span><span class="v" style="color:${m.median>=0?'var(--up)':'var(--down)'}">${m.median>=0?'+':''}${(m.median*100).toFixed(2)}%</span></div>
+    <div class="kv"><span class="k">上涨家数占比</span><span class="v">${m.upPct.toFixed(1)}%（${m.up}涨 / ${m.dn}跌）</span></div>
+    <div class="kv"><span class="k">两市成交额</span><span class="v">${(m.totAmt/1e8).toFixed(0)}亿</span></div>
+    <div class="kv"><span class="k">判定</span><span class="v" style="color:${col}">${verdict}</span></div>
+    <div class="src" style="margin-top:5px;line-height:1.6">理由：${why}</div>
+  </div>`;
+}
+function renderMarketBox(){
+  const box=document.getElementById('marketBox');
+  if(!box) return;
+  box.outerHTML = buildMarketBoxHtml(STATE.market);
+}
 function renderL1(code){
   const p=L1_PROFILE[code];
   const body=document.getElementById('l1body');
 
   // —— 大盘赚钱效应（数据驱动，自动；与复盘清单①共用同一份 STATE.market，只拉一次）——
-  const m=STATE.market;
-  let mb='';
-  if(m){
-    const ok=m.median>=0.001 && m.upPct>=45 && m.totAmt>=6000*1e8;
-    const col=ok?'var(--green)':'var(--red)';
-    const verdict=ok?'✓ 环境友好（通过·可勾）':'✗ 环境偏弱（不通过·不勾）';
-    const why=ok
-      ? '中位数转正、涨多跌少、成交活跃 → 系统性环境利于个股表现，可放宽选股条件。'
-      : '中位数偏弱 / 涨少跌多 / 成交低迷 → 系统性风险偏大，宜控仓、只做最强结构。';
-    mb=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
-      <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">大盘赚钱效应（自动 · 全市场${m.total}只 · <span class="src">${m.source}${m.snapshotAt?(' · '+m.snapshotAt.slice(0,10)):''}${m.fresh===false?' · 偏旧':''}</span>）</div>
-      <div class="kv"><span class="k">涨跌中位数</span><span class="v" style="color:${m.median>=0?'var(--up)':'var(--down)'}">${m.median>=0?'+':''}${(m.median*100).toFixed(2)}%</span></div>
-      <div class="kv"><span class="k">上涨家数占比</span><span class="v">${m.upPct.toFixed(1)}%（${m.up}涨 / ${m.dn}跌）</span></div>
-      <div class="kv"><span class="k">两市成交额</span><span class="v">${(m.totAmt/1e8).toFixed(0)}亿</span></div>
-      <div class="kv"><span class="k">判定</span><span class="v" style="color:${col}">${verdict}</span></div>
-      <div class="src" style="margin-top:5px;line-height:1.6">理由：${why}</div>
-    </div>`;
-  }else{
-    mb=`<div style="border:1px solid var(--amber);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--panel2)">
-      <div style="color:var(--amber);font-size:12px">⚠ 大盘广度数据获取失败</div>
-      <div class="src" style="margin-top:4px;line-height:1.6">📌 如何校验：东方财富/同花顺看「上涨家数占比≥45%」+「个股涨跌中位数≥+0.1%」+「全市场成交额≥6000亿」→ 满足则大盘环境友好，可勾。</div>
-    </div>`;
-  }
+  const mb=buildMarketBoxHtml(STATE.market);
 
   if(!p){
     const fn=STATE.fund&&STATE.fund.name?('（'+STATE.fund.name+'）'):'';
@@ -642,6 +673,7 @@ async function analyze(){
     `标的：<b>${nm}</b> · 类型【${STATE.asset}】· 代码 ${code} · 数据区间 ${klines[0].date} ~ ${klines[klines.length-1].date}（${klines.length}交易日）· 现价 <b>${price?price.price.toFixed(3):cur.toFixed(3)}</b> · 序列源：${srcInfo}`;
 
   renderChecklist();
+  startMarketLive(); // 交易时段让 ① 大盘环境(盒+清单项)随首页同频(30s)实时刷新；盘后自动停
   }catch(e){ console.error('analyze error:', e); try{ document.getElementById('meta').innerHTML='分析出错：'+(e&&e.message?e.message:e)+'（按钮已解锁，可重试）'; }catch(_){} }
   finally{ btn.disabled=false; btn.textContent='运行分析'; }
 }
@@ -1041,6 +1073,33 @@ function buildChecks(){
   return C;
 }
 let CHK_AUTO={};
+// ① 大盘环境交易时段实时刷新：只更新 大盘赚钱效应盒 + ① 清单项，不重建整个 checklist（避免覆盖用户手动勾选）
+let _marketTimer=null, _marketRefreshing=false;
+function startMarketLive(){
+  if(_marketTimer) return;
+  const tick=async ()=>{
+    if(_marketRefreshing) return;
+    if(!isAshareTradingTime()){ clearInterval(_marketTimer); _marketTimer=null; return; } // 盘后停止刷新
+    _marketRefreshing=true;
+    try{
+      const b=await fetchMarketBreadth();
+      if(b){ STATE.market=b; renderMarketBox(); patchChk1(); }
+    }catch(e){} finally{ _marketRefreshing=false; }
+  };
+  tick();
+  _marketTimer=setInterval(tick, 30000); // 与首页上方市场广度同频(30s)
+}
+function patchChk1(){
+  const checks=buildChecks(); const c=checks[0]; if(!c) return;
+  let av; try{ av=c.judge(); }catch(e){ av='manual'; }
+  const inp=document.querySelector('#checklist input[data-chk="0"]');
+  if(inp && av!=='manual' && av!=='na') inp.checked=(av===true);
+  const ev=document.getElementById('chkevi0'); if(!ev) return;
+  let txt=null; try{ txt=c.evi(); }catch(e){}
+  if(av==='manual') ev.innerHTML=`<span style="color:var(--amber)">⚠ 数据暂未取到（网络/跨域临时波动），本项中性、不计入缺口</span>`;
+  else if(av===true) ev.innerHTML=`<span style="color:var(--green);font-weight:600">✓ 通过</span> <span class="src">${txt||''}</span> <span style="color:var(--green)">→ ${c.pass}</span>`;
+  else ev.innerHTML=`<span style="color:var(--red);font-weight:600">✗ 未通过</span> <span class="src">${txt||''}</span> <span style="color:var(--red)">→ ${c.fail}</span>`;
+}
 function renderChecklist(){
   const el=document.getElementById('checklist'); el.innerHTML='';
   const checks=buildChecks(); CHK_AUTO={};
