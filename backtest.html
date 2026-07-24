@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>信号回测工具 · 重要信号与异动监控</title>
+<style>
+  :root{
+    --bg-main:#0f1115; --bg-panel:#161a22; --bg-panel2:#1c212b; --border:#2a3140;
+    --text:#e6e9ef; --text-2:#aab2c0; --text-3:#6b7484;
+    --up:#ef4d4d; --down:#1fab5a; --accent:#4a90d9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-main);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:18px}
+  h1{font-size:17px;margin:0 0 4px}
+  .sub{color:var(--text-3);font-size:12px;margin-bottom:14px}
+  .panel{background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:14px}
+  .opts{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+  .opt{display:flex;flex-direction:column;gap:5px}
+  .opt label{font-size:12px;color:var(--text-2)}
+  select,button{background:var(--bg-panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .note{font-size:11px;color:var(--text-3);margin-top:6px;max-width:760px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
+  .kpi{background:var(--bg-panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:2px}
+  .kpi .l{font-size:11px;color:var(--text-3)}
+  .v.up{color:var(--up)} .v.down{color:var(--down)} .v.neu{color:var(--text)}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)}
+  th{color:var(--text-3);font-weight:600;position:sticky;top:0;background:var(--bg-panel)}
+  td.l,th.l{text-align:left}
+  .tag-hit{color:var(--down)} .tag-wrong{color:var(--up)} .tag-flat{color:var(--text-3)}
+  .sec{font-size:14px;font-weight:600;margin:18px 0 4px}
+  .bar{height:8px;border-radius:4px;background:var(--bg-panel2);overflow:hidden;display:inline-block;width:80px;vertical-align:middle;margin-left:6px}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  .empty{color:var(--text-3);padding:20px;text-align:center}
+  code{background:var(--bg-panel2);padding:1px 5px;border-radius:4px;color:var(--text-2)}
+  .err{color:var(--up);font-size:12px}
+  .scroll{max-height:520px;overflow:auto}
+  .legend{font-size:11px;color:var(--text-3);margin-top:6px}
+</style>
+</head>
+<body>
+  <h1>重要信号与异动监控 · 回测工具</h1>
+  <div class="sub">读取你浏览器本地 <code>localStorage['ashare_signals_v3']</code> 的真实信号历史，按模块自定口径做样本外验证。同源打开才读得到数据。</div>
+
+  <div class="panel">
+    <div class="opts">
+      <div class="opt">
+        <label>入场价口径</label>
+        <select id="entryMode">
+          <option value="close">信号首现日收盘（模块默认 entryPrice）</option>
+          <option value="nextopen">次日开盘（更贴近可执行）</option>
+        </select>
+      </div>
+      <div class="opt">
+        <label>退出规则</label>
+        <select id="exitMode">
+          <option value="ma5">破 MA5 止损/止盈（模块文案推荐）</option>
+          <option value="fixed5">固定持有 5 个交易日</option>
+          <option value="fixed10">固定持有 10 个交易日</option>
+        </select>
+      </div>
+      <div class="opt">
+        <label>最低确定性</label>
+        <select id="certTh">
+          <option value="0">全部（含 0.6 待验）</option>
+          <option value="0.8" selected>仅 ≥0.80（与模块输出一致）</option>
+          <option value="0.85">仅 ≥0.85</option>
+        </select>
+      </div>
+      <div class="opt" style="justify-content:flex-end">
+        <button class="primary" id="runBtn">运行回测</button>
+      </div>
+    </div>
+    <div class="note">
+      口径说明：<b>方向判定</b>沿用模块 <code>verifySignal</code> 的 ±0.5% 阈值（多头：涨≥0.5% 命中、跌≤-0.5% 反向、否则微动；减仓/规避/空仓观望视为"做空/规避"，反向计分）。
+      <b>多头动作</b>＝买入/加仓/跟进；<b>空头动作</b>＝减仓/空仓观望/规避；持有/观望/关注不建仓（仅单独统计方向准确度，不计入期望值）。
+      破 MA5 规则：多头在收盘价跌破前一日 MA5 时离场；空头在收盘站上前一日 MA5 时回补；超过 20 个交易日强制按第 20 日收盘结算。
+    </div>
+  </div>
+
+  <div id="status" class="panel" style="display:none"></div>
+
+  <div id="result" style="display:none">
+    <div class="panel">
+      <div class="kpis" id="kpis"></div>
+      <div class="legend" id="sampleNote"></div>
+    </div>
+
+    <div class="sec">分桶校准（确定性 vs 真实命中率）</div>
+    <div class="panel"><div class="scroll"><table id="tblCert"><thead>
+      <tr><th class="l">确定性区间</th><th>信号数</th><th>命中率</th><th>期望值(均值收益)</th><th>中位收益</th><th>真实命中 vs 声称</th></tr>
+    </thead><tbody></tbody></table></div></div>
+
+    <div class="sec">按动作分</div>
+    <div class="panel"><div class="scroll"><table id="tblAct"><thead>
+      <tr><th class="l">动作</th><th>方向</th><th>信号数</th><th>命中率</th><th>期望值</th></tr>
+    </thead><tbody></tbody></table></div></div>
+
+    <div class="sec">按入场时大盘状态分</div>
+    <div class="panel"><div class="scroll"><table id="tblReg"><thead>
+      <tr><th class="l">状态</th><th>信号数</th><th>命中率</th><th>期望值</th></tr>
+    </thead><tbody></tbody></table></div></div>
+
+    <div class="sec">逐信号明细（含未建仓的观察类）</div>
+    <div class="panel"><div class="scroll"><table id="tblDet"><thead>
+      <tr><th class="l">首现日</th><th class="l">标的</th><th class="l">动作</th><th class="l">状态</th><th>确定性</th><th>入场价</th><th>出场价</th><th>收益</th><th class="l">判定</th></tr>
+    </thead><tbody></tbody></table></div>
+      <div style="margin-top:8px"><button id="csvBtn">导出 CSV</button> <span class="legend">CSV 含全部明细，可二次分析。</span></div>
+    </div>
+  </div>
+
+<script>
+/* ---------- 同源复用模块的 jsonp / secid / 日期工具 ---------- */
+function jsonpGet(url, cb, timeout){
+  return new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    const tk='__jp'+Math.random().toString(36).slice(2);
+    let done=false;
+    const clean=()=>{ try{ if(window.__bt_tm&&window.__bt_tm[tk]) clearTimeout(window.__bt_tm[tk]); }catch(e){} try{document.head.removeChild(script);}catch(e){} delete window[tk]; };
+    window[tk]=(d)=>{ if(done)return; done=true; clean(); resolve(d); };
+    script.onerror=()=>{ if(done)return; done=true; clean(); reject(new Error('net')); };
+    script.src=url+(url.indexOf('cb=')>=0?('&cb='+tk):('&cb='+tk));
+    const t=setTimeout(()=>{ if(done)return; done=true; clean(); reject(new Error('timeout')); }, timeout||15000);
+    window.__bt_tm=window.__bt_tm||{}; window.__bt_tm[tk]=t;
+    document.head.appendChild(script);
+  });
+}
+function emSecid(code){
+  if(code==='000001') return '1.000001';
+  if(/^BK/i.test(code)) return '90.'+code;
+  const c1=code[0];
+  if(c1==='6'||c1==='9'||c1==='5') return '1.'+code;
+  if(c1==='8'||c1==='4') return '0.'+code;
+  if(c1==='0'||c1==='1'||c1==='2'||c1==='3') return '0.'+code;
+  return '1.'+code;
+}
+function ymdAdd(ymd, days){
+  const d=new Date(ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8)+'T00:00:00');
+  d.setDate(d.getDate()+days);
+  const p=n=>String(n).padStart(2,'0');
+  return ''+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate());
+}
+/* 拉取日K：beg/end 为 YYYYMMDD，返回 [{date,open,close}] */
+async function fetchKline(code, beg, end){
+  const secid=emSecid(code);
+  const url=`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&klt=101&fqt=0&beg=${beg}&end=${end}&fields1=f1&fields2=f51,f52,f53`;
+  const cb='emk_'+Math.random().toString(36).slice(2);
+  const d=await jsonpGet(url, cb, 15000);
+  const kl=d&&d.data&&d.data.klines;
+  if(!kl||!kl.length) return [];
+  return kl.map(s=>{const p=s.split(',');return {date:p[0].replace(/-/g,''), open:parseFloat(p[1]), close:parseFloat(p[2])};});
+}
+/* 缓存：同一标的只拉一次（首现日往前25天做MA5预热，往后90天覆盖出场窗口） */
+const KL_CACHE={};
+async function ensureKline(code, firstDate){
+  const key=code;
+  if(KL_CACHE[key]) return KL_CACHE[key];
+  const beg=ymdAdd(firstDate,-25), end=ymdAdd(firstDate,90);
+  const arr=await fetchKline(code,beg,end);
+  KL_CACHE[key]=arr;
+  return arr;
+}
+/* 取 firstDate 之后的第 off 个交易日（off=0 即首现日）的 bar；含首现日往前预热用于MA5 */
+function sliceFrom(kl, firstDate){
+  const idx=kl.findIndex(b=>b.date>=firstDate);
+  if(idx<0) return null;
+  return {idx, kl};
+}
+function ma5At(kl, i){
+  if(i<4) return null;
+  let s=0; for(let j=i-4;j<=i;j++) s+=kl[j].close;
+  return s/5;
+}
+
+/* ---------- 方向分类（沿用 verifySignal 的 ±0.5%） ---------- */
+function classify(retPct, action){
+  const longA=['买入','加仓','跟进'];
+  const shortA=['减仓','空仓观望','规避'];
+  if(longA.includes(action)){
+    if(retPct>=0.5) return 'hit';
+    if(retPct<=-0.5) return 'wrong';
+    return 'flat';
+  } else if(shortA.includes(action)){
+    if(retPct<=-0.5) return 'hit';
+    if(retPct>=0.5) return 'wrong';
+    return 'flat';
+  }
+  return 'observe';
+}
+
+/* ---------- 单信号回测 ---------- */
+async function backtestOne(m, opts){
+  const code=m.entryCode||'';
+  if(!code) return null;
+  let kl;
+  try{ kl=await ensureKline(code, m.firstDate); }catch(e){ return {skip:true, reason:'kline失败'}; }
+  if(!kl||!kl.length) return {skip:true, reason:'无K线'};
+  const sl=sliceFrom(kl, m.firstDate);
+  if(!sl) return {skip:true, reason:'首现日不在K线内'};
+  const {idx}=sl;
+  // 入场价
+  let entryPrice=m.entryPrice>0?m.entryPrice:null;
+  if(entryPrice==null && kl[idx]) entryPrice=kl[idx].close;
+  if(entryPrice==null||!(entryPrice>0)) return {skip:true, reason:'入场价缺失'};
+  let entryBar=kl[idx];
+  let exitBar, exitPrice, offDays, retPct;
+  if(opts.entryMode==='nextopen'){
+    if(idx+1>=kl.length) return {skip:true, reason:'无次日数据'};
+    entryPrice=kl[idx+1].open; entryBar=kl[idx+1];
+  }
+  const base=(opts.entryMode==='nextopen')? idx+1 : idx;
+  if(opts.exitMode==='ma5'){
+    const longA=['买入','加仓','跟进'];
+    const isLong=longA.includes(m.action);
+    let exited=false;
+    const cap=Math.min(base+20, kl.length-1);
+    for(let i=base+1;i<=cap;i++){
+      const prevMa=ma5At(kl,i-1);
+      if(prevMa==null) continue;
+      if(isLong && kl[i].close < prevMa){ exitBar=kl[i]; offDays=i-base; exited=true; break; }
+      if(!isLong && kl[i].close > prevMa){ exitBar=kl[i]; offDays=i-base; exited=true; break; }
+    }
+    if(!exited){ exitBar=kl[cap]; offDays=cap-base; }
+  } else {
+    const N=opts.exitMode==='fixed10'?10:5;
+    const ti=Math.min(base+N, kl.length-1);
+    if(ti<=base) return {skip:true, reason:'窗口不足'};
+    exitBar=kl[ti]; offDays=ti-base;
+  }
+  exitPrice=exitBar.close;
+  // 空头动作会计为做空：收益 = (entry-exit)/entry（方向反转）
+  const shortA=['减仓','空仓观望','规避'];
+  const isShort=shortA.includes(m.action);
+  retPct = isShort ? (entryPrice-exitPrice)/entryPrice*100 : (exitPrice-entryPrice)/entryPrice*100;
+  const outcome=classify(retPct, m.action);
+  return {code, firstDate:m.firstDate, action:m.action, cycle:m.cycle, certainty:m.certainty,
+    entryPrice, exitPrice, offDays, retPct, outcome,
+    regime:m.entryRegime||'unknown', tag:m.tag, sectors:m.sectors, observe: outcome==='observe'};
+}
+
+/* ---------- 聚合 ---------- */
+function pct(x){return (x>=0?'+':'')+x.toFixed(2)+'%';}
+function mean(a){return a.length?a.reduce((s,x)=>s+x,0)/a.length:0;}
+function median(a){if(!a.length)return 0;const b=a.slice().sort((x,y)=>x-y);const n=b.length;return n%2?b[(n-1)/2]:(b[n/2-1]+b[n/2])/2;}
+
+function aggregate(rows, opts){
+  const traded=rows.filter(r=>!r.skip && !r.observe);
+  const observed=rows.filter(r=>!r.skip && r.observe);
+  const kpi={n:0, hit:0, wr:0, exp:0, med:0, winSum:0};
+  if(traded.length){
+    const hits=traded.filter(r=>r.outcome==='hit').length;
+    kpi.n=traded.length; kpi.hit=hits; kpi.wr=hits/traded.length*100;
+    kpi.exp=mean(traded.map(r=>r.retPct)); kpi.med=median(traded.map(r=>r.retPct));
+  }
+  // 分桶：确定性
+  const buckets=[{l:'0.80–0.85',lo:0.80,hi:0.85},{l:'0.85–0.90',lo:0.85,hi:0.90},{l:'≥0.90',lo:0.90,hi:9}];
+  const certRows=buckets.map(b=>{
+    const rs=traded.filter(r=>r.certainty>=b.lo && r.certainty<b.hi);
+    if(!rs.length) return {...b,n:0,wr:null,exp:null,med:null};
+    const hits=rs.filter(r=>r.outcome==='hit').length;
+    return {...b,n:rs.length,wr:hits/rs.length*100,exp:mean(rs.map(r=>r.retPct)),med:median(rs.map(r=>r.retPct))};
+  });
+  // 按动作
+  const acts=[];
+  const seenAct={};
+  traded.forEach(r=>{ if(!seenAct[r.action]){seenAct[r.action]=true;acts.push(r.action);} });
+  const actRows=acts.map(a=>{
+    const rs=traded.filter(r=>r.action===a);
+    const hits=rs.filter(r=>r.outcome==='hit').length;
+    return {action:a, dir:['买入','加仓','跟进'].includes(a)?'多':'空', n:rs.length, wr:hits/rs.length*100, exp:mean(rs.map(r=>r.retPct))};
+  });
+  // 按状态
+  const regs=[];
+  const seenReg={};
+  traded.forEach(r=>{ if(!seenReg[r.regime]){seenReg[r.regime]=true;regs.push(r.regime);} });
+  const regRows=regs.map(rg=>{
+    const rs=traded.filter(r=>r.regime===rg);
+    const hits=rs.filter(r=>r.outcome==='hit').length;
+    return {regime:rg,n:rs.length,wr:hits/rs.length*100,exp:mean(rs.map(r=>r.retPct))};
+  });
+  return {kpi, certRows, actRows, regRows, traded, observed, rows};
+}
+
+/* ---------- 渲染 ---------- */
+function render(rows, opts){
+  const ag=aggregate(rows, opts);
+  document.getElementById('result').style.display='';
+  const k=ag.kpi;
+  const kpiHtml=`
+    <div class="kpi"><div class="l">可交易信号数（多/空）</div><div class="v neu">${k.n}</div></div>
+    <div class="kpi"><div class="l">方向命中率(±0.5%)</div><div class="v ${k.wr>=50?'up':'down'}">${k.n?k.wr.toFixed(1)+'%':'—'}</div></div>
+    <div class="kpi"><div class="l">期望值(均值收益)</div><div class="v ${k.exp>=0?'up':'down'}">${k.n?pct(k.exp):'—'}</div></div>
+    <div class="kpi"><div class="l">中位收益</div><div class="v neu">${k.n?pct(k.med):'—'}</div></div>
+    <div class="kpi"><div class="l">观察类信号数</div><div class="v neu">${ag.observed.length}</div></div>`;
+  document.getElementById('kpis').innerHTML=kpiHtml;
+  document.getElementById('sampleNote').textContent=
+    `样本＝你本地存储的真实信号（同源 localStorage，最多保留近 ${''+'若干'} 交易日）。注意：样本量较小且依赖页面打开天数，结论为方向性参考而非统计定论；若要看大样本，需做历史规则重放（见对话说明）。`;
+
+  // 确定性分桶
+  const tb=document.querySelector('#tblCert tbody');
+  tb.innerHTML=ag.certRows.map(b=>{
+    if(!b.n) return `<tr><td class="l">${b.l}</td><td colspan="5" style="text-align:left;color:var(--text-3)">无样本</td></tr>`;
+    const claimMid=(b.lo+b.hi)/2*100;
+    const diff=b.wr-claimMid;
+    return `<tr><td class="l">${b.l}</td><td>${b.n}</td><td class="${b.wr>=50?'tag-hit':'tag-wrong'}">${b.wr.toFixed(1)}%</td>
+      <td class="${b.exp>=0?'tag-hit':'tag-wrong'}">${pct(b.exp)}</td><td>${pct(b.med)}</td>
+      <td>${diff>=0?'+':''}${diff.toFixed(1)}pp ${diff<-5?'⚠️低':'·'}</td></tr>`;
+  }).join('');
+
+  // 动作
+  const ta=document.querySelector('#tblAct tbody');
+  ta.innerHTML=ag.actRows.map(r=>`<tr><td class="l">${r.action}</td><td>${r.dir}</td><td>${r.n}</td>
+    <td class="${r.wr>=50?'tag-hit':'tag-wrong'}">${r.wr.toFixed(1)}%</td><td class="${r.exp>=0?'tag-hit':'tag-wrong'}">${pct(r.exp)}</td></tr>`).join('');
+
+  // 状态
+  const tr=document.querySelector('#tblReg tbody');
+  tr.innerHTML=ag.regRows.map(r=>`<tr><td class="l">${r.regime}</td><td>${r.n}</td>
+    <td class="${r.wr>=50?'tag-hit':'tag-wrong'}">${r.wr.toFixed(1)}%</td><td class="${r.exp>=0?'tag-hit':'tag-wrong'}">${pct(r.exp)}</td></tr>`).join('');
+
+  // 明细
+  window.__bt_rows=rows;
+  const td=document.querySelector('#tblDet tbody');
+  td.innerHTML=rows.filter(r=>!r.skip).map(r=>{
+    if(r.observe) return `<tr><td class="l">${r.firstDate}</td><td class="l">${r.sectors}</td><td class="l">${r.action}</td><td class="l">${r.regime}</td><td>${(r.certainty*100).toFixed(0)}%</td><td>${r.entryPrice.toFixed(2)}</td><td>—</td><td>—</td><td class="l">观察(不建仓)</td></tr>`;
+    const cls=r.outcome==='hit'?'tag-hit':(r.outcome==='wrong'?'tag-wrong':'tag-flat');
+    return `<tr><td class="l">${r.firstDate}</td><td class="l">${r.sectors}</td><td class="l">${r.action}</td><td class="l">${r.regime}</td><td>${(r.certainty*100).toFixed(0)}%</td><td>${r.entryPrice.toFixed(2)}</td><td>${r.exitPrice.toFixed(2)}</td><td class="${r.retPct>=0?'tag-hit':'tag-wrong'}">${pct(r.retPct)}</td><td class="l ${cls}">${r.outcome==='hit'?'命中':r.outcome==='wrong'?'反向':'微动'}</td></tr>`;
+  }).join('');
+}
+
+function csv(rows){
+  const head=['首现日','标的','动作','状态','确定性','入场价','出场价','收益%','判定','持有交易日'];
+  const lines=[head.join(',')];
+  rows.filter(r=>!r.skip).forEach(r=>{
+    if(r.observe){ lines.push([r.firstDate,r.sectors,r.action,r.regime,(r.certainty*100).toFixed(0),r.entryPrice.toFixed(2),'','','观察',''].join(',')); return; }
+    const o=r.outcome==='hit'?'命中':r.outcome==='wrong'?'反向':'微动';
+    lines.push([r.firstDate,r.sectors,r.action,r.regime,(r.certainty*100).toFixed(0),r.entryPrice.toFixed(2),r.exitPrice.toFixed(2),r.retPct.toFixed(2),o,r.offDays].join(','));
+  });
+  const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='signal_backtest.csv'; a.click();
+}
+
+/* ---------- 主流程 ---------- */
+async function run(){
+  const opts={
+    entryMode:document.getElementById('entryMode').value,
+    exitMode:document.getElementById('exitMode').value,
+    certTh:parseFloat(document.getElementById('certTh').value)
+  };
+  const raw=localStorage.getItem('ashare_signals_v3');
+  const st=document.getElementById('status');
+  st.style.display='';
+  if(!raw){ st.innerHTML='<span class="err">未找到 localStorage['+"'ashare_signals_v3'"+']。请先在本同源打开过「重要信号与异动监控」面板（让信号产生并存储），再回来运行。</span>'; return; }
+  let store; try{ store=JSON.parse(raw); }catch(e){ st.innerHTML='<span class="err">localStorage 解析失败</span>'; return; }
+  const days=store.days||{};
+  let msgs=[];
+  for(const d of Object.keys(days)){ (days[d].messages||[]).forEach(m=>msgs.push(m)); }
+  // 过滤：确定性阈值
+  if(opts.certTh>0) msgs=msgs.filter(m=>(m.certainty||0)>=opts.certTh);
+  // 去重同一 lk@firstDate，避免同一逻辑信号重复计数
+  const seen={}; msgs=msgs.filter(m=>{const k=(m.lk||m.tag+'|'+m.sectors)+'@'+(m.firstDate||''); if(seen[k])return false; seen[k]=1; return true;});
+  if(!msgs.length){ st.innerHTML='<span class="err">当前阈值下无信号可回测。</span>'; return; }
+  st.innerHTML='正在拉取历史K线并回测 '+msgs.length+' 条信号（含观察类）…';
+
+  const results=[];
+  let done=0;
+  for(const m of msgs){
+    let r;
+    try{ r=await backtestOne(m,opts); }catch(e){ r={skip:true,reason:'err'}; }
+    results.push(r||{skip:true,reason:'null'});
+    done++;
+    if(done%5===0) st.innerHTML='回测中… '+done+'/'+msgs.length;
+  }
+  const skipped=results.filter(r=>r.skip).length;
+  st.innerHTML='完成。共 '+results.length+' 条，有效 '+ (results.length-skipped) +'，跳过(缺数据) '+skipped+'。';
+  render(results, opts);
+}
+
+document.getElementById('runBtn').addEventListener('click',()=>{ document.getElementById('runBtn').disabled=true; run().finally(()=>{document.getElementById('runBtn').disabled=false;}); });
+document.getElementById('csvBtn').addEventListener('click',()=>{ if(window.__bt_rows) csv(window.__bt_rows); });
+</script>
+</body>
+</html>
