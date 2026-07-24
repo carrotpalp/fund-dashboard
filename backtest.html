@@ -144,7 +144,8 @@ function emSecid(code){
   return '1.'+code;
 }
 function ymdAdd(ymd, days){
-  const d=new Date(ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8)+'T00:00:00');
+  const s=String(ymd).replace(/\D/g,''); // 兼容 "2026-07-24" 与 "20260724"
+  const d=new Date(s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T00:00:00');
   d.setDate(d.getDate()+days);
   const p=n=>String(n).padStart(2,'0');
   return ''+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate());
@@ -171,7 +172,8 @@ async function ensureKline(code, firstDate){
 }
 /* 取 firstDate 之后的第 off 个交易日（off=0 即首现日）的 bar；含首现日往前预热用于MA5 */
 function sliceFrom(kl, firstDate){
-  const idx=kl.findIndex(b=>b.date>=firstDate);
+  const fd=String(firstDate).replace(/\D/g,''); // 归一为 YYYYMMDD，与 kline.date 同口径
+  const idx=kl.findIndex(b=>b.date>=fd);
   if(idx<0) return null;
   return {idx, kl};
 }
@@ -405,7 +407,10 @@ async function run(){
     if(done%5===0) st.innerHTML='回测中… '+done+'/'+msgs.length;
   }
   const skipped=results.filter(r=>r.skip).length;
-  st.innerHTML='完成。共 '+results.length+' 条，有效 '+ (results.length-skipped) +'，跳过(缺数据) '+skipped+'。';
+  const skipReasons={};
+  results.filter(r=>r.skip).forEach(r=>{ const k=r.reason||'unknown'; skipReasons[k]=(skipReasons[k]||0)+1; });
+  const skipTxt=Object.keys(skipReasons).map(k=>k+':'+skipReasons[k]).join('，');
+  st.innerHTML='完成。共 '+results.length+' 条，有效 '+(results.length-skipped)+'，跳过 '+skipped+'（'+skipTxt+'）。';
   render(results, opts);
 }
 
