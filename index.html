@@ -3576,7 +3576,7 @@ function fundTag(q){
   const d = (q.navDate||'').slice(5);                 // MM-DD
   if(q.isQDII && q.est && d) return '<span class="wl-est">估·'+d+'</span>';            // QDII 盘中估算：标注相对净值日期（多滞后到上一交易日）
   if(q.isQDII && q.isOfficial && !q.isToday && d) return '<span class="wl-est">官方·'+d+'</span>'; // QDII 官方净值滞后：标注其真实披露日期
-  if(q.est && q.estMethod==='holdings') return '<span class="wl-est">估</span>';  // 自建持仓估算（替代已下线的天天基金接口）
+  if(q.est && (q.estMethod==='holdings'||q.estMethod==='holdings-weighted'||q.estMethod==='holdings-equal')) return '<span class="wl-est">估</span>';  // 自建持仓估算（按 fundf10 实际权重加权；替代已下线的天天基金接口）
   if(q.est) return '<span class="wl-est">估</span>';
   return '';
 }
