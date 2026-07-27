@@ -922,11 +922,11 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="pb">
         <div class="ss-grid">
           <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
-          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">东财行业/概念板块榜·已剔除风格桶·TOP3且达标=主线</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 当日强势板块 <span class="ss-tag">东财当日板块强度榜·已剔除风格桶·当日强≠已确认主流</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
-        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；主线榜/低位补涨 = 东财行业·概念板块榜（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；当日强势板块/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）。<b style="color:#e8a33d">【重要】本榜是"当日板块强度"排序（雷立刚"主流板块"判定的当日代理），板块是否已成"主流"还需结合近阶段持续性与趋势，单日涨幅榜可能含一日游题材，请勿直接等同于已确认主线。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
     </div>
   </div>
@@ -5533,7 +5533,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
         '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
         '<span class="ss-tagline"><span class="ss-chip">'+s.amt.toFixed(0)+'亿</span>'+
         (s.lu>0?'<span class="ss-chip bull">涨停'+s.lu+'</span>':'')+
-        (isMain?'<span class="ss-badge main">主线</span>':'')+'</span></div>';
+        (isMain?'<span class="ss-badge main">当日主线</span>':'')+'</span></div>';
     }).join('');
   }
   function renderSsLow(list){
