@@ -4678,11 +4678,13 @@ async function estimateFundGz(code){
       if(nav>0){
         const navDate = tsToDate(last.x);
         const name = (pd.name||'').trim();
-        // QDII 判定：名称含境外关键词，或净值披露日滞后 >1 天（T+2 及以上多为 QDII/互认基金）
-        const ys = new Date(Date.now()-86400000), p=n=>String(n).padStart(2,'0');
-        const yStr = ys.getFullYear()+'-'+p(ys.getMonth()+1)+'-'+p(ys.getDate());
+        // QDII 判定：名称含境外关键词，或净值披露日滞后 >1 个交易日（T+2 及以上多为 QDII/互认基金）
+        // 关键：用「前一交易日」而非「昨天」做基准——周一/节后首日最新净值为上周五（距今天历3天但仅隔1交易日），
+        // 若用日历昨天会误判为 QDII 导致不估算；用前一交易日则 周五==前一交易日，不误判。
+        const pad2=n=>String(n).padStart(2,'0');
+        const prevTd = (()=>{ const x=new Date(); do{ x.setDate(x.getDate()-1); }while(x.getDay()===0||x.getDay()===6); return x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate()); })();
         const nameQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外|美国|全球|亚太|欧洲|日本|德国|香港|恒生|中概|境外|美元/.test(name);
-        const isQDII = nameQDII || (navDate && navDate < yStr);
+        const isQDII = nameQDII || (navDate && navDate < prevTd);
         const chgPct = (prevNav>0) ? +(((nav-prevNav)/prevNav)*100).toFixed(2) : (+(last.equityReturn||0)||0);
         const chgAmt = +((nav-prevNav)).toFixed(4);
         if(isQDII){
