@@ -623,6 +623,58 @@ html.light .theme-btn::after{content:'☀️';left:16px}
   .sb-summary,.udt-stats{grid-template-columns:1fr}
   .sector-streak{grid-template-columns:1fr}
 }
+/* ===================== 顺势实战看板（雷立刚模式信号化） ===================== */
+.ss-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ss-regime{grid-column:1 / -1;background:linear-gradient(180deg,rgb(from var(--bg-panel2) r g b /.7),rgb(from var(--bg-panel) r g b /.4));border:1px solid var(--border-light);border-radius:8px;padding:12px 14px}
+.ss-card{background:var(--bg-panel2);border:1px solid var(--border);border-radius:8px;padding:11px 13px}
+.ss-card h4{font-size:12px;color:var(--text-2);font-weight:700;margin:0 0 8px;display:flex;align-items:center;gap:6px}
+.ss-card h4 .ss-tag{font-size:10px;color:var(--text-3);font-weight:400}
+.ss-regime-body{display:flex;flex-wrap:wrap;align-items:center;gap:18px}
+.ss-light{font-size:20px;font-weight:800;padding:6px 16px;border-radius:10px;letter-spacing:.5px;white-space:nowrap}
+.ss-light.summer{color:var(--up);background:rgb(from var(--up) r g b /.16);border:1px solid rgb(from var(--up) r g b /.5)}
+.ss-light.spring{color:var(--gold);background:rgb(from var(--gold) r g b /.16);border:1px solid rgb(from var(--gold) r g b /.5)}
+.ss-light.winter{color:var(--down);background:rgb(from var(--down) r g b /.16);border:1px solid rgb(from var(--down) r g b /.5)}
+.ss-light.loading{color:var(--text-3);background:rgb(from var(--slate-500) r g b /.14);border:1px solid var(--border)}
+.ss-idxs{display:flex;gap:22px;flex-wrap:wrap}
+.ss-idx{font-size:12px;color:var(--text-2)}
+.ss-idx b{font-family:var(--mono);font-size:13px;color:var(--text-1);font-weight:700}
+.ss-idx .up-c,.ss-idx .down-c{font-family:var(--mono)}
+.ss-breadth{font-size:12px;color:var(--text-2)}
+.ss-breadth b{color:var(--text-1);font-family:var(--mono)}
+.ss-list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow:auto}
+.ss-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;font-size:12px;padding:4px 6px;border-radius:4px;background:rgb(from var(--bg-main) r g b /.4)}
+.ss-row:hover{background:var(--bg-hover)}
+.ss-name{color:var(--text-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-name .ss-code{color:var(--text-3);font-size:10px;margin-left:4px;font-family:var(--mono)}
+.ss-val{font-family:var(--mono);text-align:right;white-space:nowrap}
+.ss-badge{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700}
+.ss-badge.main{color:var(--up);background:rgb(from var(--up) r g b /.16)}
+.ss-badge.low{color:var(--gold);background:rgb(from var(--gold) r g b /.16)}
+.ss-badge.warn{color:var(--down);background:rgb(from var(--down) r g b /.16)}
+.ss-tagline{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.ss-chip{font-size:10px;padding:1px 5px;border-radius:4px;background:var(--bg-hover);color:var(--text-2);white-space:nowrap}
+.ss-chip.bull{color:var(--up);background:rgb(from var(--up) r g b /.14)}
+.ss-chip.bear{color:var(--down);background:rgb(from var(--down) r g b /.14)}
+.ss-chip.vr{color:var(--gold);background:rgb(from var(--gold) r g b /.14)}
+.ss-watch-grid{display:flex;flex-direction:column;gap:4px;max-height:340px;overflow:auto}
+.ss-watch-row{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;font-size:12px;padding:4px 6px;border-radius:4px;background:rgb(from var(--bg-main) r g b /.4)}
+.ss-watch-row .ss-wn{font-weight:600;color:var(--text-1);white-space:nowrap}
+.ss-watch-row .ss-wpct{font-family:var(--mono);text-align:right;min-width:54px}
+.ss-watch-row .ss-wma{font-family:var(--mono);font-size:10px;color:var(--text-3);text-align:right;white-space:nowrap}
+.ss-event-add{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.ss-event-add input[type=date]{background:var(--bg-main);border:1px solid var(--border);color:var(--text-1);border-radius:4px;padding:3px 6px;font-size:11px}
+.ss-event-add input[type=text]{flex:1;min-width:90px;background:var(--bg-main);border:1px solid var(--border);color:var(--text-1);border-radius:4px;padding:3px 6px;font-size:11px}
+.ss-event-add button{background:var(--blue);color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer}
+.ss-event-list{display:flex;flex-direction:column;gap:5px}
+.ss-event-item{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 6px;border-radius:4px;background:rgb(from var(--bg-main) r g b /.4)}
+.ss-event-item .ss-edate{font-family:var(--mono);color:var(--text-3);font-size:10px}
+.ss-event-item .ss-ename{color:var(--text-1);flex:1}
+.ss-event-item .ss-ecount{font-family:var(--mono);font-weight:700}
+.ss-event-item .ss-ecount.near{color:var(--gold)}
+.ss-event-item .ss-ecount.past{color:var(--down)}
+.ss-event-item button{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;line-height:1}
+.ss-note{margin-top:10px;font-size:10px;color:var(--text-3);line-height:1.5}
+@media(max-width:980px){ .ss-grid{grid-template-columns:1fr} }
 </style>
 <script>(function(){ try{ if(localStorage.getItem('ashare_theme_v1')==='light') document.documentElement.classList.add('light'); }catch(e){} })();</script>
 <script src="plotly.min.js" defer></script>
@@ -859,6 +911,31 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       </div>
       <div class="sig-actions"><button id="clearSigHist" title="清空本地保存的历史信号，从今天开始重新记录验证">清空历史信号（从今日起重新验证）</button><button id="verifySigHist" title="按最新行情复盘历史信号：回填入场价 + 标注命中/反向">复盘验证（收盘后）</button><span id="verifySigStatus" class="sig-verify-status"></span></div>
       <div class="gr r4" id="insightRow"></div>
+    </div>
+  </div>
+
+  <!-- Row 4.5: 顺势实战看板（雷立刚模式信号化：大盘定调/主线榜/自选信号/低位补涨/事件锚点） -->
+  <div class="gr r2">
+    <div class="panel" data-panel="shunshi" style="border-color:var(--gold)">
+      <div class="ph"><span class="pt">🧭 顺势实战看板 <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">基于已核实的「主流板块 + 顺势 + 事件锚定」操作框架</span></span>
+        <span class="ps"><button id="ssRefreshBtn" class="wl-io-btn" title="立即刷新顺势看板">刷新</button><span id="ssSub" style="margin-left:8px;font-size:11px;color:var(--text-3)"></span></span></div>
+      <div class="pb">
+        <div class="ss-grid">
+          <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">行业·概念板块·涨幅/成交额/涨停三维</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
+          <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">主线内涨最少·量能初放</span></h4><div class="ss-list" id="ssLow"></div></div>
+          <div class="ss-card ss-event"><h4>⏰ 事件锚点 <span class="ss-tag">确定性事件=撤退线</span></h4>
+            <div class="ss-event-add">
+              <input type="date" id="ssEvDate">
+              <input type="text" id="ssEvName" placeholder="如：长鑫上市 / 美联储议息">
+              <button id="ssEvAdd">添加</button>
+            </div>
+            <div class="ss-event-list" id="ssEventList"></div>
+          </div>
+        </div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；主线榜/低位补涨 = 东财行业·概念板块榜；自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+      </div>
     </div>
   </div>
 
@@ -5380,6 +5457,194 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     else document.addEventListener('DOMContentLoaded', function(){ setTimeout(go,400); });
     var b=document.getElementById('recapBtn'); if(b) b.onclick=go;
   })();
+</script>
+
+<!-- 顺势实战看板（雷立刚模式信号化）：大盘定调 / 主线榜 / 自选信号 / 低位补涨 / 事件锚点 -->
+<script>
+(function(){
+  'use strict';
+  const ssFmtPct = n => (n>0?'+':'') + (n||0).toFixed(2) + '%';
+
+  // ---------- 大盘定调灯（上证/创业板 MA20 + 市场广度） ----------
+  let _idxCache = {ts:0, sh:null, sz:null};
+  async function _idxTech(symbol){
+    const cb = 'skl_' + Math.random().toString(36).slice(2,9);
+    const arr = await sinaKlineJsonp(symbol, cb);
+    if(!arr || !arr.length) return null;
+    const closes = arr.map(x=>parseFloat(x.close)||0).filter(v=>v>0);
+    if(closes.length < 22) return null;
+    return computeTech(closes);
+  }
+  async function fetchSsRegime(){
+    const now = Date.now();
+    if(now - _idxCache.ts > 300000){ // 指数 MA20 缓存 5 分钟
+      try{ _idxCache.sh = await _idxTech('sh000001'); }catch(e){}
+      try{ _idxCache.sz = await _idxTech('sz399006'); }catch(e){}
+      _idxCache.ts = now;
+    }
+    const sh = _idxCache.sh, sz = _idxCache.sz;
+    const br = (window.STATE && STATE.breadth) || null;
+    const shAbove = sh && sh.ma20 ? sh.price > sh.ma20 : null;
+    const szAbove = sz && sz.ma20 ? sz.price > sz.ma20 : null;
+    const brUp = br && typeof br.median_chg==='number' ? br.median_chg > 0 : null;
+    const upPct = (br && br.up!=null && br.total) ? (br.up/br.total*100) : null;
+    let regime, rcls;
+    if(shAbove===null && szAbove===null){ regime='加载中…'; rcls='loading'; }
+    else if(shAbove && szAbove && brUp){ regime='夏季 · 顺势持有'; rcls='summer'; }
+    else if(shAbove || szAbove){ regime='春季 · 结构性播种'; rcls='spring'; }
+    else { regime='冬季 · 空仓观望'; rcls='winter'; }
+    const idxHtml = (label, t)=>{
+      if(!t || !t.ma20) return '<div class="ss-idx">'+label+'：<b>—</b></div>';
+      const d = (t.price/t.ma20 - 1)*100, c = d>=0?'up-c':'down-c';
+      return '<div class="ss-idx">'+label+'：<b class="'+c+'">'+(d>=0?'+':'')+d.toFixed(2)+'%</b> <span class="'+c+'">MA20'+(d>=0?'上':'下')+'</span></div>';
+    };
+    const brHtml = br ? '<div class="ss-breadth">广度：涨 <b>'+br.up+'</b> / 跌 <b>'+br.down+'</b>（<b class="'+(upPct>=50?'up-c':'down-c')+'">'+(upPct!=null?upPct.toFixed(1):'—')+'%</b> 上涨）· 中位 <b class="'+(br.median_chg>=0?'up-c':'down-c')+'">'+ssFmtPct(br.median_chg)+'</b></div>' : '';
+    document.getElementById('ssRegime').innerHTML =
+      '<div class="ss-regime-body"><span class="ss-light '+rcls+'">'+regime+'</span>'+
+      '<div class="ss-idxs">'+idxHtml('上证', sh)+idxHtml('创业板', sz)+'</div>'+brHtml+'</div>';
+  }
+
+  // ---------- 主线榜 + 低位补涨探针（东财行业/概念板块榜） ----------
+  async function fetchSsSectors(){
+    const host = 'https://push2delay.eastmoney.com/api/qt/clist/get';
+    const mk = (fs)=> host+'?pn=1&pz=500&po=0&np=1&fltt=2&invt=2&fid=f3&fs='+fs+'&fields=f12,f14,f3,f6,f104,f105';
+    const [ind, con] = await Promise.allSettled([
+      jsonpGet(mk('m:90+t:2'), 'emcb_'+Math.random().toString(36).slice(2)),
+      jsonpGet(mk('m:90+t:3'), 'emcb_'+Math.random().toString(36).slice(2))
+    ]);
+    const parse = (r)=>{ try{ return (r.value && r.value.data && r.value.data.diff) || []; }catch(e){ return []; } };
+    // 排除指数/风格类综合板块（非可交易主线），避免"富时罗素/中证500/破净股"以超大涨停数霸榜
+    const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指/;
+    const all = parse(ind).concat(parse(con)).filter(s=>s.f14 && !NOISE.test(s.f14)).map(s=>{
+      const amtYi = (s.f6||0)/1e8;
+      const score = (s.f3||0) + (s.f104||0)*0.6 + (amtYi>150?1.5:0) + (amtYi>300?1.5:0);
+      return {name:s.f14, code:s.f12, chg:s.f3||0, amt:amtYi, lu:s.f104||0, score};
+    });
+    const main = all.slice().sort((a,b)=>b.score-a.score).slice(0,10);
+    const low = all.filter(s=>s.chg>0 && s.chg<6 && s.amt>20 && s.lu<8).sort((a,b)=>a.chg-b.chg).slice(0,8);
+    renderSsMain(main);
+    renderSsLow(low);
+  }
+  function renderSsMain(list){
+    const el = document.getElementById('ssMainline');
+    if(!list || !list.length){ el.innerHTML = '<div class="ss-row"><span class="ss-name">板块数据暂不可用</span></div>'; return; }
+    el.innerHTML = list.map(s=>{
+      const c = s.chg>=0?'up-c':'down-c';
+      const isMain = s.lu>=3 || s.amt>300;
+      return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
+        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
+        '<span class="ss-tagline"><span class="ss-chip">'+s.amt.toFixed(0)+'亿</span>'+
+        (s.lu>0?'<span class="ss-chip bull">涨停'+s.lu+'</span>':'')+
+        (isMain?'<span class="ss-badge main">主线</span>':'')+'</span></div>';
+    }).join('');
+  }
+  function renderSsLow(list){
+    const el = document.getElementById('ssLow');
+    if(!list || !list.length){ el.innerHTML = '<div class="ss-row"><span class="ss-name">暂无低涨幅放量板块</span></div>'; return; }
+    el.innerHTML = list.map(s=>{
+      const c = s.chg>=0?'up-c':'down-c';
+      return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
+        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
+        '<span class="ss-tagline"><span class="ss-chip">'+s.amt.toFixed(0)+'亿</span><span class="ss-badge low">埋伏</span></span></div>';
+    }).join('');
+  }
+
+  // ---------- 自选股信号条（MA + 实时量价） ----------
+  async function fetchSsWatch(){
+    const wl = (window.STATE && STATE.watchlist) || [];
+    const rows = [];
+    for(const w of wl){
+      if(!w) continue;
+      if(w.classify==='OTCFUND'){
+        if(w.q && w.q.est && w.q.isToday) rows.push({name:w.name||w.code, pct:w.q.change_pct||0, ma:'—', chips:['<span class="ss-chip">估</span>']});
+        continue;
+      }
+      if(!w.code || !/^\d{6}$/.test(w.code)) continue;
+      if(typeof dailyVisible==='function' && !dailyVisible(w)) continue;
+      let tech=null; try{ tech = await enrichWatchTech(w); }catch(e){ tech=null; }
+      const q = w.q||{}, pct = q.change_pct||0, vr = q.vol_ratio||0;
+      const chips=[];
+      if(tech && tech.ma20){
+        const price = tech.price;
+        const above20 = price > tech.ma20;
+        const maBull = price>tech.ma5 && tech.ma5>tech.ma10 && tech.ma10>tech.ma20;
+        if(maBull && tech.golden) chips.push('<span class="ss-chip bull">多头+金叉·持有</span>');
+        else if(above20 && maBull) chips.push('<span class="ss-chip bull">站上20日·顺势</span>');
+        else if(above20) chips.push('<span class="ss-chip bull">站上20日</span>');
+        else if(price < tech.ma5 && above20) chips.push('<span class="ss-chip">回踩5日</span>');
+        else if(!above20) chips.push('<span class="ss-chip bear">跌破20日·弱</span>');
+        if(tech.dead) chips.push('<span class="ss-chip bear">MACD死叉</span>');
+      } else {
+        chips.push('<span class="ss-chip">MA未确认</span>');
+      }
+      if(vr>=3){ chips.push('<span class="ss-chip vr">量比'+vr.toFixed(1)+'</span>'); if(pct<0) chips.push('<span class="ss-chip bear">放巨量跌</span>'); }
+      const maTxt = (tech&&tech.ma20)? ('MA5 '+fmt2(tech.ma5)+' / MA20 '+fmt2(tech.ma20)) : 'MA未确认';
+      rows.push({name:w.name||w.code, pct, ma:maTxt, chips});
+    }
+    const el = document.getElementById('ssWatch');
+    if(!rows.length){ el.innerHTML='<div class="ss-watch-row"><span class="ss-wn">暂无自选股信号</span></div>'; return; }
+    el.innerHTML = rows.map(r=>{
+      const c = r.pct>=0?'up-c':'down-c';
+      return '<div class="ss-watch-row"><span class="ss-wn">'+r.name+'</span>'+
+        '<span class="ss-wpct '+c+'">'+ssFmtPct(r.pct)+'</span>'+
+        '<span style="text-align:right"><div class="ss-wma">'+r.ma+'</div>'+
+        '<div class="ss-tagline" style="justify-content:flex-end;margin-top:2px">'+r.chips.join('')+'</div></span></div>';
+    }).join('');
+  }
+
+  // ---------- 事件锚点（localStorage，确定性事件=撤退线） ----------
+  const SS_EV_KEY = 'ss_events_v1';
+  function loadSsEvents(){ try{ return JSON.parse(localStorage.getItem(SS_EV_KEY)||'[]'); }catch(e){ return []; } }
+  function saveSsEvents(a){ try{ localStorage.setItem(SS_EV_KEY, JSON.stringify(a)); }catch(e){} }
+  function renderSsEvents(){
+    const list = loadSsEvents(), el = document.getElementById('ssEventList');
+    if(!list.length){ el.innerHTML='<div class="ss-event-item"><span class="ss-ename" style="color:var(--text-3)">添加确定性事件作为撤退线，如「长鑫上市」</span></div>'; return; }
+    const today = new Date(); today.setHours(0,0,0,0);
+    el.innerHTML = list.slice().sort((a,b)=>a.date<b.date?-1:1).map((e,i)=>{
+      const d = new Date(e.date+'T00:00:00'), days = Math.round((d-today)/86400000);
+      let cc='', txt;
+      if(days>0){ txt='剩 '+days+' 天'; }
+      else if(days===0){ cc='near'; txt='就是今天'; }
+      else { cc='past'; txt='已过期 '+Math.abs(days)+' 天'; }
+      return '<div class="ss-event-item"><span class="ss-edate">'+e.date+'</span>'+
+        '<span class="ss-ename">'+e.name+'</span><span class="ss-ecount '+cc+'">'+txt+'</span>'+
+        '<button data-i="'+i+'" class="ss-ev-del" title="删除">×</button></div>';
+    }).join('');
+    el.querySelectorAll('.ss-ev-del').forEach(b=> b.onclick=()=>{
+      const a=loadSsEvents(); a.splice(+b.dataset.i,1); saveSsEvents(a); renderSsEvents();
+    });
+  }
+
+  // ---------- 编排 ----------
+  let _ssBusy=false;
+  async function renderShunshiBoard(){
+    if(_ssBusy) return; _ssBusy=true;
+    const sub = document.getElementById('ssSub');
+    if(sub) sub.textContent='刷新中…';
+    try{
+      await Promise.allSettled([ fetchSsRegime(), fetchSsSectors(), fetchSsWatch() ]);
+      renderSsEvents();
+    }catch(e){ console.error('shunshi', e); }
+    finally{ if(sub) sub.textContent='更新 '+new Date().toTimeString().slice(0,5); _ssBusy=false; }
+  }
+  function bindSsEvents(){
+    const add=document.getElementById('ssEvAdd');
+    if(add) add.onclick=()=>{
+      const d=document.getElementById('ssEvDate').value, n=document.getElementById('ssEvName').value.trim();
+      if(!d||!n) return;
+      const a=loadSsEvents(); a.push({date:d,name:n}); saveSsEvents(a);
+      document.getElementById('ssEvName').value=''; renderSsEvents();
+    };
+    const rb=document.getElementById('ssRefreshBtn');
+    if(rb) rb.onclick=()=>renderShunshiBoard();
+  }
+  function ssGo(){
+    bindSsEvents(); renderSsEvents(); renderShunshiBoard();
+    setInterval(renderShunshiBoard, 60000); // 60s 刷新；指数MA20/自选tech 各自5分钟缓存
+  }
+  if(document.readyState!=='loading') setTimeout(ssGo, 600);
+  else document.addEventListener('DOMContentLoaded', ()=>setTimeout(ssGo, 600));
+})();
 </script>
 </body>
 </html>
