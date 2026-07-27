@@ -922,11 +922,11 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="pb">
         <div class="ss-grid">
           <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
-          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">涨幅/成交额/涨停 三维归一化·成交额加权·TOP3且达标=主线</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">东财行业/概念板块榜·已剔除风格桶·TOP3且达标=主线</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
-          <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">主线内涨最少·量能初放</span></h4><div class="ss-list" id="ssLow"></div></div>
+          <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
-        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；主线榜/低位补涨 = 东财行业·概念板块榜；自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；主线榜/低位补涨 = 东财行业·概念板块榜（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
     </div>
   </div>
@@ -5505,19 +5505,21 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
       jsonpGet(mk('m:90+t:3'), 'emcb_'+Math.random().toString(36).slice(2))
     ]);
     const parse = (r)=>{ try{ return (r.value && r.value.data && r.value.data.diff) || []; }catch(e){ return []; } };
-    // 排除指数/风格类综合板块（非可交易主线），避免"富时罗素/中证500/破净股"以超大涨停数霸榜
-    const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指|行业龙头|权重股|茅指数|周期股|参股银行|参股券商|核心资产|蓝筹股|宁组合/;
+    // 排除指数/风格/大概念桶（非具体可交易主线），避免"中证500/互联网金融/绿色电力"以超大涨停数霸榜
+    const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指|行业龙头|权重股|茅指数|周期股|参股银行|参股券商|核心资产|蓝筹股|宁组合|风格|中特估|中字头|央视50|趋势股|红利股|红利破净|金融地产|医药医疗|互联网金融|绿色电力|稀缺资源|PPP模式|REITs|化债/;
     const all = parse(ind).concat(parse(con)).filter(s=>s.f14 && !NOISE.test(s.f14)).map(s=>({
       name:s.f14, code:s.f12, chg:s.f3||0, amt:(s.f6||0)/1e8, lu:s.f104||0
     }));
     if(all.length){
-      // 归一化复合评分：涨幅25% + 成交额45%(权重最高=资金真实流向) + 涨停25%(对数压缩,抑制宽基板虚高)
+      // 归一化复合评分：涨幅25% + 成交额45%(权重最高=资金真实流向) + 涨停25%(对数压缩，抑制宽基板虚高)
       const norm=(a)=>{const mx=Math.max.apply(null,a),mn=Math.min.apply(null,a);return v=>mx===mn?0:(v-mn)/(mx-mn);};
       const nC=norm(all.map(s=>s.chg)), nA=norm(all.map(s=>s.amt)), nL=norm(all.map(s=>Math.log10(1+s.lu)));
       all.forEach(s=>{ s.score = 100*(0.25*nC(s.chg)+0.45*nA(s.amt)+0.25*nL(Math.log10(1+s.lu))); });
     } else { all.forEach(s=>s.score=0); }
-    const main = all.slice().sort((a,b)=>b.score-a.score).slice(0,10);
-    const low = all.filter(s=>s.chg>0 && s.chg<6 && s.amt>20 && s.lu<8).sort((a,b)=>a.chg-b.chg).slice(0,8);
+    const mainCandidates = all.slice().sort((a,b)=>b.score-a.score).slice(0,15);
+    const main = mainCandidates.slice(0,10);
+    // 低位补涨只在热度前15里挑"涨得最少但成交额够"的板块，避免银行/电力等防御板块混入
+    const low = mainCandidates.filter(s=>s.chg>0 && s.chg<3 && s.amt>=50).sort((a,b)=>a.chg-b.chg).slice(0,8);
     renderSsMain(main);
     renderSsLow(low);
   }
