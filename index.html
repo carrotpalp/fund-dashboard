@@ -4239,15 +4239,15 @@ function getFundSession(){
   if(hm<=900) return 'PM';
   return 'POST';                               // 15:00 后 → 取当日正式净值
 }
-// 港股是否已收盘（16:00 后 / 周末）
+// 港股是否已收盘（16:10 后 / 周末，含收盘竞价时段 16:00–16:10）
 function hkSettled(){
   const d=new Date(), day=d.getDay(), hm=d.getHours()*60+d.getMinutes();
   if(day===0||day===6) return true;
-  return hm >= 960; // 港股 16:00 收盘
+  return hm >= 970; // 港股 16:10 收盘（含收盘竞价时段 16:00–16:10）
 }
 // 某自选标的当日是否已“收盘/定稿”，可停止定时请求：
 //  · 场外基金：当日正式净值已披露
-//  · 港股：16:00 后 / 周末
+//  · 港股：16:10 后（收盘竞价结束）/ 周末
 //  · A股/ETF/可转债等：15:00 后（CLOSE/OFF）
 function isItemSettled(w){
   const code=(w.code||''), cls=(w.classify||'');
@@ -4902,7 +4902,7 @@ async function refreshWatchlistQuotes(){
   try{
   const nonOtc = STATE.watchlist.filter(w=>w.classify!=='OTCFUND');
   const isHKCode = w => /^\d{4,5}$/.test(w.code);
-  // 已收盘（A股15:00后 / 港股16:00后 / 周末）或当日正式净值已出 → 已有最终数据，跳过网络请求
+  // 已收盘（A股15:00后 / 港股16:10后 / 周末）或当日正式净值已出 → 已有最终数据，跳过网络请求
   const skip = w => { const s = isItemSettled(w); return s && !!w.q; };
   const liveNonOtc = nonOtc.filter(w=> !skip(w));
   const hkItems = liveNonOtc.filter(isHKCode);
