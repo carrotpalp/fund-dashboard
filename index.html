@@ -922,17 +922,9 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="pb">
         <div class="ss-grid">
           <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
-          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">行业·概念板块·涨幅/成交额/涨停三维</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">按板块(非全市场·勿累加)·全市场涨停看「涨跌家数比」</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">主线内涨最少·量能初放</span></h4><div class="ss-list" id="ssLow"></div></div>
-          <div class="ss-card ss-event"><h4>⏰ 事件锚点 <span class="ss-tag">确定性事件=撤退线</span></h4>
-            <div class="ss-event-add">
-              <input type="date" id="ssEvDate">
-              <input type="text" id="ssEvName" placeholder="如：长鑫上市 / 美联储议息">
-              <button id="ssEvAdd">添加</button>
-            </div>
-            <div class="ss-event-list" id="ssEventList"></div>
-          </div>
         </div>
         <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；主线榜/低位补涨 = 东财行业·概念板块榜；自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
@@ -5496,7 +5488,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     const idxHtml = (label, t)=>{
       if(!t || !t.ma20) return '<div class="ss-idx">'+label+'：<b>—</b></div>';
       const d = (t.price/t.ma20 - 1)*100, c = d>=0?'up-c':'down-c';
-      return '<div class="ss-idx">'+label+'：<b class="'+c+'">'+(d>=0?'+':'')+d.toFixed(2)+'%</b> <span class="'+c+'">MA20'+(d>=0?'上':'下')+'</span></div>';
+      return '<div class="ss-idx">'+label+'：<b class="'+c+'">'+(d>=0?'+':'')+d.toFixed(2)+'%</b> <span class="'+c+'">较MA20'+(d>=0?'上':'下')+'方</span></div>';
     };
     const brHtml = br ? '<div class="ss-breadth">广度：涨 <b>'+br.up+'</b> / 跌 <b>'+br.down+'</b>（<b class="'+(upPct>=50?'up-c':'down-c')+'">'+(upPct!=null?upPct.toFixed(1):'—')+'%</b> 上涨）· 中位 <b class="'+(br.median_chg>=0?'up-c':'down-c')+'">'+ssFmtPct(br.median_chg)+'</b></div>' : '';
     document.getElementById('ssRegime').innerHTML =
@@ -5592,28 +5584,6 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     }).join('');
   }
 
-  // ---------- 事件锚点（localStorage，确定性事件=撤退线） ----------
-  const SS_EV_KEY = 'ss_events_v1';
-  function loadSsEvents(){ try{ return JSON.parse(localStorage.getItem(SS_EV_KEY)||'[]'); }catch(e){ return []; } }
-  function saveSsEvents(a){ try{ localStorage.setItem(SS_EV_KEY, JSON.stringify(a)); }catch(e){} }
-  function renderSsEvents(){
-    const list = loadSsEvents(), el = document.getElementById('ssEventList');
-    if(!list.length){ el.innerHTML='<div class="ss-event-item"><span class="ss-ename" style="color:var(--text-3)">添加确定性事件作为撤退线，如「长鑫上市」</span></div>'; return; }
-    const today = new Date(); today.setHours(0,0,0,0);
-    el.innerHTML = list.slice().sort((a,b)=>a.date<b.date?-1:1).map((e,i)=>{
-      const d = new Date(e.date+'T00:00:00'), days = Math.round((d-today)/86400000);
-      let cc='', txt;
-      if(days>0){ txt='剩 '+days+' 天'; }
-      else if(days===0){ cc='near'; txt='就是今天'; }
-      else { cc='past'; txt='已过期 '+Math.abs(days)+' 天'; }
-      return '<div class="ss-event-item"><span class="ss-edate">'+e.date+'</span>'+
-        '<span class="ss-ename">'+e.name+'</span><span class="ss-ecount '+cc+'">'+txt+'</span>'+
-        '<button data-i="'+i+'" class="ss-ev-del" title="删除">×</button></div>';
-    }).join('');
-    el.querySelectorAll('.ss-ev-del').forEach(b=> b.onclick=()=>{
-      const a=loadSsEvents(); a.splice(+b.dataset.i,1); saveSsEvents(a); renderSsEvents();
-    });
-  }
 
   // ---------- 编排 ----------
   let _ssBusy=false;
@@ -5623,23 +5593,15 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     if(sub) sub.textContent='刷新中…';
     try{
       await Promise.allSettled([ fetchSsRegime(), fetchSsSectors(), fetchSsWatch() ]);
-      renderSsEvents();
     }catch(e){ console.error('shunshi', e); }
     finally{ if(sub) sub.textContent='更新 '+new Date().toTimeString().slice(0,5); _ssBusy=false; }
   }
   function bindSsEvents(){
-    const add=document.getElementById('ssEvAdd');
-    if(add) add.onclick=()=>{
-      const d=document.getElementById('ssEvDate').value, n=document.getElementById('ssEvName').value.trim();
-      if(!d||!n) return;
-      const a=loadSsEvents(); a.push({date:d,name:n}); saveSsEvents(a);
-      document.getElementById('ssEvName').value=''; renderSsEvents();
-    };
     const rb=document.getElementById('ssRefreshBtn');
     if(rb) rb.onclick=()=>renderShunshiBoard();
   }
   function ssGo(){
-    bindSsEvents(); renderSsEvents(); renderShunshiBoard();
+    bindSsEvents(); renderShunshiBoard();
     setInterval(renderShunshiBoard, 60000); // 60s 刷新；指数MA20/自选tech 各自5分钟缓存
   }
   if(document.readyState!=='loading') setTimeout(ssGo, 600);
