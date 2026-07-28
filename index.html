@@ -926,7 +926,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
-        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 东财板块历史日K(push2his)算 MA20 与多头排列</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"板块相对强度"排序（涨幅35% + 成交额40% + 上涨家数占比25%）。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20 且多头排列)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；若 push2his 不可用，则仅显示当日强度并标注。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 东财板块历史日K(push2his)算 MA5/10/20 + MACD，给出顺势/观望/回避建议</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"板块相对强度"排序（涨幅55% + 成交额25% + 上涨家数占比20%）。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20、均线多头排列、MACD向上)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；每个板块同时给出"顺势关注/短线过热·等回踩/转强观察/震荡持有/趋势下·回避"建议。若 push2his 不可用，则仅显示当日强度并标注。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
     </div>
   </div>
@@ -5540,11 +5540,14 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     const allDown = list.every(s=>s.chg<0);
     el.innerHTML = list.map((s,i)=>{
       const c = s.chg>=0?'up-c':'down-c';
-      const t = s.trend;                                  // {aboveMa20, bull, ma20, ma5, ma10, price}
-      const isMain = !!(t && t.bull);                     // 真·主流：当日强 + 趋势向上(站上MA20且多头排列)
+      const t = s.trend;                                  // {aboveMa20,bull,macdUp,bias20,ma20/5/10,dif,dea,macd,price,advice}
+      const isMain = !!(t && t.bull && t.macdUp);         // 真·主流：当日强 + 均线多头排列 + MACD向上
       const trendTag = t
-        ? (t.bull ? '<span class="ss-chip bull">多头↑</span>'
-            : (t.aboveMa20 ? '<span class="ss-chip">站上MA20</span>' : '<span class="ss-chip weak">MA20下</span>'))
+        ? (t.bull
+            ? '<span class="ss-chip bull" title="MA5>MA10>MA20，MACD向上，偏离MA20 '+t.bias20.toFixed(1)+'%">'+t.advice+'</span>'
+            : (t.aboveMa20
+                ? '<span class="ss-chip" title="站上MA20，MACD '+t.advice+'">'+t.advice+'</span>'
+                : '<span class="ss-chip weak" title="MA20下方">'+t.advice+'</span>'))
         : '';
       const upDownChip = s.up>0 || s.down>0
         ? '<span class="ss-chip">涨'+s.up+'/跌'+s.down+'</span>'
@@ -5559,7 +5562,9 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     if(allDown){
       el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">今日板块普跌，榜单按「相对强度」排序：绿盘=跌得最少/资金最活跃/内部上涨家数占比最高</div>');
     } else if(_trendState.tried && !_trendState.available){
-      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势数据源(push2his)暂不可用，仅显示当日强度，未做趋势过滤</div>');
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势数据源暂不可用，仅显示当日强度，未做趋势过滤</div>');
+    } else if(_trendState.available){
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">✓ 已叠加趋势过滤：均线(MA5/10/20)+MACD；仅「多头排列+MACD向上」标「主流板块」</div>');
     }
   }
   function renderSsLow(list){
@@ -5573,24 +5578,46 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     }).join('');
   }
 
-  // ---------- 趋势增强：拉板块历史日K，判定"已走出来" ----------
+  // ---------- 趋势增强：拉板块历史日K，用均线+MACD判定趋势并给建议 ----------
   const _trendState = { available:false, tried:false };
   function enrichSectorTrend(s){
     const secid = '90.' + s.code;   // 行业/概念板块统一用 90.BKxxxx
+    // 东财官方K线接口格式（从 quotekchart/1.0.6.js 提取）：必须带 ut，fqt=0（不复权），beg=0
     const url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get'
       + '?secid=' + encodeURIComponent(secid)
-      + '&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f53&klt=101&fqt=1&end=20500101&lmt=60';
+      + '&ut=fa5fd1943c7b386f172d6893dbfba10b'
+      + '&fields1=f1,f2,f3,f4,f5,f6'
+      + '&fields2=f51,f53'
+      + '&klt=101&fqt=0&beg=0&end=20500101&smplmt=1000000&lmt=60';
     const cb = 'emk_' + Math.random().toString(36).slice(2);
-    return jsonpGet(url, cb, 5000).then(data=>{
+    return jsonpGet(url, cb, 7000).then(data=>{
       const kl = data && data.data && data.data.klines;
       if(!kl || !kl.length) throw new Error('empty');
       const closes = kl.map(x=>parseFloat(String(x).split(',')[2])).filter(v=>v>0);  // f53=收盘
-      if(closes.length < 20) throw new Error('short');
+      if(closes.length < 26) throw new Error('short');
       const tech = computeTech(closes);
+      const bias20 = tech.ma20 ? (tech.price - tech.ma20)/tech.ma20*100 : 0;
+      const macdUp = tech.macd > 0 && tech.dif > tech.dea;
+      const bull = tech.price > tech.ma20 && tech.ma5 > tech.ma10 && tech.ma10 > tech.ma20;
+      // 交易建议：结合趋势形态、MACD动能、偏离度
+      let advice = '';
+      if(bull && macdUp){
+        advice = bias20 > 15 ? '短线过热·等回踩' : '顺势关注';
+      } else if(tech.price > tech.ma20 && macdUp){
+        advice = '转强观察';
+      } else if(tech.price > tech.ma20){
+        advice = '震荡持有';
+      } else {
+        advice = '趋势下·回避';
+      }
       s.trend = {
         aboveMa20: tech.price > tech.ma20,
-        bull: tech.price > tech.ma20 && tech.ma5 > tech.ma10 && tech.ma10 > tech.ma20,  // 多头排列
-        ma20: tech.ma20, ma5: tech.ma5, ma10: tech.ma10, price: tech.price
+        bull: bull,
+        macdUp: macdUp,
+        bias20: bias20,
+        ma20: tech.ma20, ma5: tech.ma5, ma10: tech.ma10,
+        dif: tech.dif, dea: tech.dea, macd: tech.macd,
+        price: tech.price, advice: advice
       };
       _trendState.available = true;
     });
