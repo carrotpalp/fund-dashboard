@@ -922,11 +922,11 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="pb">
         <div class="ss-grid">
           <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
-          <div class="ss-card ss-mainline"><h4>🔥 当日强势板块 <span class="ss-tag">东财当日强度+趋势过滤(站上MA20/多头)→真·主流板块</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 板块强度榜 <span class="ss-tag">东财行业/概念板块·相对强度排序（今日普跌时绿盘=相对抗跌）</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
-        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；当日强势板块/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 东财板块历史日K(push2his)算 MA20 与多头排列</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"当日板块强度"排序，再叠加"趋势过滤"(板块站上 MA20 且多头排列)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；若 push2his 不可用，则仅显示当日强度并标注。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 东财板块历史日K(push2his)算 MA20 与多头排列</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"板块相对强度"排序（涨幅35% + 成交额40% + 上涨家数占比25%）。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20 且多头排列)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；若 push2his 不可用，则仅显示当日强度并标注。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
     </div>
   </div>
@@ -5505,20 +5505,24 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
       jsonpGet(mk('m:90+t:3'), 'emcb_'+Math.random().toString(36).slice(2))
     ]);
     const parse = (r)=>{ try{ return (r.value && r.value.data && r.value.data.diff) || []; }catch(e){ return []; } };
-    // 排除指数/风格/大概念桶（非具体可交易主线），避免"中证500/互联网金融/绿色电力"以超大涨停数霸榜
-    const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指|行业龙头|权重股|茅指数|周期股|参股银行|参股券商|核心资产|蓝筹股|宁组合|风格|中特估|中字头|央视50|趋势股|红利股|红利破净|金融地产|医药医疗|互联网金融|绿色电力|稀缺资源|PPP模式|REITs|化债/;
-    const all = parse(ind).concat(parse(con)).filter(s=>s.f14 && !NOISE.test(s.f14)).map(s=>({
-      name:s.f14, code:s.f12, chg:s.f3||0, amt:(s.f6||0)/1e8, lu:s.f104||0
-    }));
+    // 排除指数/风格/大概念桶（非具体可交易主线），避免"中证500/互联网金融/绿色电力"以成分股数量霸榜
+    const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指|行业龙头|权重股|茅指数|周期股|参股银行|参股券商|核心资产|蓝筹股|宁组合|风格|中特估|中字头|央视50|趋势股|红利股|红利破净|金融地产|医药医疗|互联网金融|绿色电力|稀缺资源|PPP模式|REITs|化债|深成|上证|深证|50|180|380|500|1000|龙头|成长/;
+    const MIN_AMT = 100; // 板块成交额门槛(亿)，剔除小成交额微板块，保证榜单反映资金真实战场
+    const all = parse(ind).concat(parse(con))
+      .filter(s=>s.f14 && !NOISE.test(s.f14) && (s.f6||0)/1e8 >= MIN_AMT)
+      .map(s=>{
+        const up = s.f104||0, down = s.f105||0, total = up+down;
+        return {name:s.f14, code:s.f12, chg:s.f3||0, amt:(s.f6||0)/1e8, up, down, upRatio: total>0 ? up/total : 0};
+      });
     if(all.length){
-      // 归一化复合评分：涨幅25% + 成交额45%(权重最高=资金真实流向) + 涨停25%(对数压缩，抑制宽基板虚高)
+      // 归一化复合评分：涨幅35% + 成交额40%(权重最高=资金真实流向) + 上涨家数占比25%(板块内情绪)
       const norm=(a)=>{const mx=Math.max.apply(null,a),mn=Math.min.apply(null,a);return v=>mx===mn?0:(v-mn)/(mx-mn);};
-      const nC=norm(all.map(s=>s.chg)), nA=norm(all.map(s=>s.amt)), nL=norm(all.map(s=>Math.log10(1+s.lu)));
-      all.forEach(s=>{ s.score = 100*(0.25*nC(s.chg)+0.45*nA(s.amt)+0.25*nL(Math.log10(1+s.lu))); });
+      const nC=norm(all.map(s=>s.chg)), nA=norm(all.map(s=>s.amt)), nR=norm(all.map(s=>s.upRatio));
+      all.forEach(s=>{ s.score = 100*(0.35*nC(s.chg)+0.40*nA(s.amt)+0.25*nR(s.upRatio)); });
     } else { all.forEach(s=>s.score=0); }
     const mainCandidates = all.slice().sort((a,b)=>b.score-a.score).slice(0,15);
     const main = mainCandidates.slice(0,10);
-    // 低位补涨只在热度前15里挑"涨得最少但成交额够"的板块，避免银行/电力等防御板块混入
+    // 低位补涨只在热度前15里挑"涨得最少但成交额够"的板块；市场普跌日本身无正涨幅板块时自然为空
     const low = mainCandidates.filter(s=>s.chg>0 && s.chg<3 && s.amt>=50).sort((a,b)=>a.chg-b.chg).slice(0,8);
     renderSsMain(main);
     renderSsLow(low);
@@ -5528,6 +5532,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
   function renderSsMain(list){
     const el = document.getElementById('ssMainline');
     if(!list || !list.length){ el.innerHTML = '<div class="ss-row"><span class="ss-name">板块数据暂不可用</span></div>'; return; }
+    const allDown = list.every(s=>s.chg<0);
     el.innerHTML = list.map((s,i)=>{
       const c = s.chg>=0?'up-c':'down-c';
       const t = s.trend;                                  // {aboveMa20, bull, ma20, ma5, ma10, price}
@@ -5536,14 +5541,19 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
         ? (t.bull ? '<span class="ss-chip bull">多头↑</span>'
             : (t.aboveMa20 ? '<span class="ss-chip">站上MA20</span>' : '<span class="ss-chip weak">MA20下</span>'))
         : '';
+      const upDownChip = s.up>0 || s.down>0
+        ? '<span class="ss-chip">涨'+s.up+'/跌'+s.down+'</span>'
+        : '';
       return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
         '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
         '<span class="ss-tagline"><span class="ss-chip">'+s.amt.toFixed(0)+'亿</span>'+
-        (s.lu>0?'<span class="ss-chip bull">涨停'+s.lu+'</span>':'')+
+        upDownChip +
         trendTag +
         (isMain?'<span class="ss-badge main">主流板块</span>':'')+'</span></div>';
     }).join('');
-    if(_trendState.tried && !_trendState.available){
+    if(allDown){
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">今日板块普跌，榜单按「相对强度」排序：绿盘=跌得最少/资金最活跃/内部上涨家数占比最高</div>');
+    } else if(_trendState.tried && !_trendState.available){
       el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势数据源(push2his)暂不可用，仅显示当日强度，未做趋势过滤</div>');
     }
   }
