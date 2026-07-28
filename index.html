@@ -926,7 +926,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
-        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 东财板块历史日K(push2his)算 MA5/10/20 + MACD，给出顺势/观望/回避建议</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"板块相对强度"排序（涨幅55% + 成交额25% + 上涨家数占比20%）。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20、均线多头排列、MACD向上)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；每个板块同时给出"顺势关注/短线过热·等回踩/转强观察/震荡持有/趋势下·回避"建议。若 push2his 不可用，则仅显示当日强度并标注。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 板块市值前4大成分股(新浪日K)等权合成历史序列，算 MA5/10/20 + MACD，给出顺势/转强/回避建议</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"板块相对强度"排序（涨幅55% + 成交额25% + 上涨家数占比20%）。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20、均线多头排列、MACD向上)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；每个板块同时给出"顺势关注/短线过热·等回踩/转强观察/震荡持有/趋势下·回避"建议（数据源浏览器可达，不再依赖被墙的 push2his）。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
     </div>
   </div>
@@ -5532,7 +5532,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     renderSsMain(main);
     renderSsLow(low);
     // 趋势增强：异步拉历史日K，判定"已走出来"(站上MA20+多头排列)，过滤一日游，标记真·主流板块（不阻塞首屏）
-    enhanceTrend(mainCandidates.slice(0,25)).then(()=>{ renderSsMain(main); }).catch(()=>{});
+    enhanceTrend(mainCandidates.slice(0,12)).then(()=>{ renderSsMain(main); }).catch(()=>{});
   }
   function renderSsMain(list){
     const el = document.getElementById('ssMainline');
@@ -5561,10 +5561,12 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     }).join('');
     if(allDown){
       el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">今日板块普跌，榜单按「相对强度」排序：绿盘=跌得最少/资金最活跃/内部上涨家数占比最高</div>');
-    } else if(_trendState.tried && !_trendState.available){
-      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势数据源暂不可用，仅显示当日强度，未做趋势过滤</div>');
-    } else if(_trendState.available){
-      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">✓ 已叠加趋势过滤：均线(MA5/10/20)+MACD；仅「多头排列+MACD向上」标「主流板块」</div>');
+    }
+    const gotTrend = list.some(s=>s.trend);
+    if(gotTrend){
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">✓ 趋势=成分股(新浪日K)等权合成·已叠加均线(MA5/10/20)+MACD；仅「多头排列+MACD向上」标「主流板块」</div>');
+    } else {
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势合成暂未取到(成分股K线缺失)，已显示当日强度；刷新后自动重试</div>');
     }
   }
   function renderSsLow(list){
@@ -5578,49 +5580,84 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     }).join('');
   }
 
-  // ---------- 趋势增强：拉板块历史日K，用均线+MACD判定趋势并给建议 ----------
+  // ---------- 趋势增强：成分股(新浪日K)等权合成板块历史，用均线+MACD判定趋势并给建议 ----------
+  // 数据源：成分股 = 东财push2delay clist(fs=b:BKxxxx, 按总市值降序取前4大)
+  //         个股历史 = 新浪JSONP(CN_MarketData.getKLineData, 大盘定调灯同款, 浏览器可达)
+  // 科学基础：板块指数本就是成分股加权，取市值前N大等权合成收盘序列近似板块走势
   const _trendState = { available:false, tried:false };
-  function enrichSectorTrend(s){
-    const secid = '90.' + s.code;   // 行业/概念板块统一用 90.BKxxxx
-    // 东财官方K线接口格式（从 quotekchart/1.0.6.js 提取）：必须带 ut，fqt=0（不复权），beg=0
-    const url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get'
-      + '?secid=' + encodeURIComponent(secid)
-      + '&ut=fa5fd1943c7b386f172d6893dbfba10b'
-      + '&fields1=f1,f2,f3,f4,f5,f6'
-      + '&fields2=f51,f53'
-      + '&klt=101&fqt=0&beg=0&end=20500101&smplmt=1000000&lmt=60';
-    const cb = 'emk_' + Math.random().toString(36).slice(2);
-    return jsonpGet(url, cb, 7000).then(data=>{
-      const kl = data && data.data && data.data.klines;
-      if(!kl || !kl.length) throw new Error('empty');
-      const closes = kl.map(x=>parseFloat(String(x).split(',')[2])).filter(v=>v>0);  // f53=收盘
-      if(closes.length < 26) throw new Error('short');
-      const tech = computeTech(closes);
-      const bias20 = tech.ma20 ? (tech.price - tech.ma20)/tech.ma20*100 : 0;
-      const macdUp = tech.macd > 0 && tech.dif > tech.dea;
-      const bull = tech.price > tech.ma20 && tech.ma5 > tech.ma10 && tech.ma10 > tech.ma20;
-      // 交易建议：结合趋势形态、MACD动能、偏离度
-      let advice = '';
-      if(bull && macdUp){
-        advice = bias20 > 15 ? '短线过热·等回踩' : '顺势关注';
-      } else if(tech.price > tech.ma20 && macdUp){
-        advice = '转强观察';
-      } else if(tech.price > tech.ma20){
-        advice = '震荡持有';
-      } else {
-        advice = '趋势下·回避';
-      }
-      s.trend = {
-        aboveMa20: tech.price > tech.ma20,
-        bull: bull,
-        macdUp: macdUp,
-        bias20: bias20,
-        ma20: tech.ma20, ma5: tech.ma5, ma10: tech.ma10,
-        dif: tech.dif, dea: tech.dea, macd: tech.macd,
-        price: tech.price, advice: advice
-      };
-      _trendState.available = true;
+  const _trendCache = {};     // code -> {ts, trend}  (5分钟缓存，避免每次刷新狂拉K线)
+  const _consCache = {};      // code -> [{sy,nm}]    (成分股列表会话级缓存)
+  async function fetchBoardConstituents(code){
+    if(_consCache[code]) return _consCache[code];
+    const host = 'https://push2delay.eastmoney.com/api/qt/clist/get';
+    const url = host + '?pn=1&pz=8&po=1&np=1&fltt=2&invt=2&fid=f20&fs=b:'+encodeURIComponent(code)
+      + '&fields=f12,f13,f14,f20,f62';
+    const cb = 'emc_' + Math.random().toString(36).slice(2);
+    const data = await jsonpGet(url, cb, 8000);
+    const diff = (data && data.data && data.data.diff) || [];
+    const cons = diff
+      .filter(s=>s.f12 && /^\d{6}$/.test(String(s.f12)) && !/^(8|4)/.test(String(s.f12)))  // 跳过北交(新浪无数据)
+      .sort((a,b)=> (b.f20||b.f62||0) - (a.f20||a.f62||0))   // 按总市值降序，兜底用成交额
+      .slice(0,6)                                            // 取市值前6大(多取几只，给"历史不足"过滤留余量)
+      .map(s=> ({ sy:(String(s.f13)==='1'?'sh':'sz')+s.f12, nm:s.f14 }));
+    _consCache[code] = cons;
+    return cons;
+  }
+  function getConsKline(sym){
+    const cb = 'skl_' + Math.random().toString(36).slice(2,9);
+    return sinaKlineJsonp(sym, cb).then(arr=>{
+      if(!arr || !arr.length) throw new Error('empty');
+      return arr.map(x=>({ date:x.day, close:parseFloat(x.close)||0 })).filter(p=>p.date && p.close>0);
     });
+  }
+  // 等权合成：以首个共同交易日为基期=100，逐日等权平均各成分(close/base)指数；至少需2-3只同日有数据
+  function synthBoardSeries(klines){
+    if(klines.length < 2) return null;
+    const dateSet = new Set();
+    klines.forEach(k=>k.forEach(p=>dateSet.add(p.date)));
+    const dates = Array.from(dateSet).sort();
+    const byDate = klines.map(k=>{ const m={}; k.forEach(p=>m[p.date]=p.close); return m; });
+    const bases = klines.map(k=> k.length ? k[0].close : 1);
+    const need = Math.min(3, klines.length);   // 至少需2-3只同日有数据(容忍个别停牌)
+    const series = [];
+    for(const d of dates){
+      let sum=0, cnt=0;
+      for(let i=0;i<byDate.length;i++){ const c=byDate[i][d]; if(c>0){ sum += c/bases[i]; cnt++; } }
+      if(cnt >= need) series.push(sum/cnt*100);
+    }
+    return series.length>=26 ? series : null;
+  }
+  async function enrichSectorTrend(s){
+    const now = Date.now();
+    if(_trendCache[s.code] && now - _trendCache[s.code].ts < 300000){ s.trend = _trendCache[s.code].trend; return; }
+    let cons;
+    try{ cons = await fetchBoardConstituents(s.code); }catch(e){ cons = []; }
+    if(!cons || cons.length < 2){ s.trend = null; return; }
+    const kls = await Promise.all(cons.map(c=> getConsKline(c.sy).catch(()=>null)));
+    const valid = kls.filter(k=> k && k.length>=26);   // 剔除历史<26日的新股/次新股，避免交集被卡死
+    if(valid.length < 2){ s.trend = null; return; }
+    const series = synthBoardSeries(valid);
+    if(!series){ s.trend = null; return; }
+    const tech = computeTech(series);
+    const bias20 = tech.ma20 ? (tech.price - tech.ma20)/tech.ma20*100 : 0;
+    const macdUp = tech.macd > 0 && tech.dif > tech.dea && !tech.dead;
+    const bull = tech.price > tech.ma20 && tech.ma5 > tech.ma10 && tech.ma10 > tech.ma20;
+    let advice = '';
+    if(bull && macdUp){
+      advice = bias20 > 15 ? '短线过热·等回踩' : '顺势关注';
+    } else if(tech.price > tech.ma20 && macdUp){
+      advice = '转强观察';
+    } else if(tech.price > tech.ma20){
+      advice = '震荡持有';
+    } else {
+      advice = '趋势下·回避';
+    }
+    const trend = {
+      aboveMa20: tech.price > tech.ma20, bull: bull, macdUp: macdUp, bias20: bias20,
+      ma20: tech.ma20, ma5: tech.ma5, ma10: tech.ma10,
+      dif: tech.dif, dea: tech.dea, macd: tech.macd, price: tech.price, advice: advice
+    };
+    s.trend = trend; _trendCache[s.code] = { ts: now, trend }; _trendState.available = true;
   }
   async function enhanceTrend(cands){
     if(!cands || !cands.length) return;
