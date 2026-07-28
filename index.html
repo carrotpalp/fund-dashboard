@@ -922,7 +922,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="pb">
         <div class="ss-grid">
           <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
-          <div class="ss-card ss-mainline"><h4>🔥 板块强度榜 <span class="ss-tag">东财行业/概念板块·相对强度排序（今日普跌时绿盘=相对抗跌）</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 板块强度榜 <span class="ss-tag">东财行业/概念板块·按今日涨幅+资金+广度综合强度排序</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
@@ -5499,26 +5499,31 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
   // ---------- 主线榜 + 低位补涨探针（东财行业/概念板块榜） ----------
   async function fetchSsSectors(){
     const host = 'https://push2delay.eastmoney.com/api/qt/clist/get';
-    const mk = (fs)=> host+'?pn=1&pz=500&po=0&np=1&fltt=2&invt=2&fid=f3&fs='+fs+'&fields=f12,f14,f3,f6,f104,f105';
-    const [ind, con] = await Promise.allSettled([
-      jsonpGet(mk('m:90+t:2'), 'emcb_'+Math.random().toString(36).slice(2)),
-      jsonpGet(mk('m:90+t:3'), 'emcb_'+Math.random().toString(36).slice(2))
+    const mk = (fs,po)=> host+'?pn=1&pz=500&po='+po+'&np=1&fltt=2&invt=2&fid=f3&fs='+fs+'&fields=f12,f14,f3,f6,f104,f105';
+    // 双向抓取：东财 clist 按 fid=f3 排序时，升序(po=0)只回下跌板块、降序(po=1)只回上涨板块；
+    // 必须两方向都抓再合并，否则会整批漏掉某一侧（旧版仅 po=0，导致榜单永远只有跌的、全绿）
+    const [ind0, ind1, con0, con1] = await Promise.allSettled([
+      jsonpGet(mk('m:90+t:2',0), 'emcb_'+Math.random().toString(36).slice(2)),
+      jsonpGet(mk('m:90+t:2',1), 'emcb_'+Math.random().toString(36).slice(2)),
+      jsonpGet(mk('m:90+t:3',0), 'emcb_'+Math.random().toString(36).slice(2)),
+      jsonpGet(mk('m:90+t:3',1), 'emcb_'+Math.random().toString(36).slice(2))
     ]);
     const parse = (r)=>{ try{ return (r.value && r.value.data && r.value.data.diff) || []; }catch(e){ return []; } };
     // 排除指数/风格/大概念桶（非具体可交易主线），避免"中证500/互联网金融/绿色电力"以成分股数量霸榜
     const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指|行业龙头|权重股|茅指数|周期股|参股银行|参股券商|核心资产|蓝筹股|宁组合|风格|中特估|中字头|央视50|趋势股|红利股|红利破净|金融地产|医药医疗|互联网金融|绿色电力|稀缺资源|PPP模式|REITs|化债|深成|上证|深证|50|180|380|500|1000|龙头|成长/;
-    const MIN_AMT = 100; // 板块成交额门槛(亿)，剔除小成交额微板块，保证榜单反映资金真实战场
-    const all = parse(ind).concat(parse(con))
+    const MIN_AMT = 10; // 板块成交额门槛(亿)：仅剔除纯微盘噪音；旧值100亿会把今天真涨的小成交额主线(乳品/教育/医院等)整批过滤掉
+    const all = parse(ind0).concat(parse(ind1), parse(con0), parse(con1))
       .filter(s=>s.f14 && !NOISE.test(s.f14) && (s.f6||0)/1e8 >= MIN_AMT)
       .map(s=>{
         const up = s.f104||0, down = s.f105||0, total = up+down;
         return {name:s.f14, code:s.f12, chg:s.f3||0, amt:(s.f6||0)/1e8, up, down, upRatio: total>0 ? up/total : 0};
       });
     if(all.length){
-      // 归一化复合评分：涨幅35% + 成交额40%(权重最高=资金真实流向) + 上涨家数占比25%(板块内情绪)
+      // 归一化复合评分：涨幅55%(主导=今日真实强度) + 成交额25%(资金厚度) + 上涨家数占比20%(板块内广度)
+      // 旧版成交额权重40%过高，钱多但下跌的大板块(电子/芯片)会压过真涨的小板块，榜单全绿
       const norm=(a)=>{const mx=Math.max.apply(null,a),mn=Math.min.apply(null,a);return v=>mx===mn?0:(v-mn)/(mx-mn);};
       const nC=norm(all.map(s=>s.chg)), nA=norm(all.map(s=>s.amt)), nR=norm(all.map(s=>s.upRatio));
-      all.forEach(s=>{ s.score = 100*(0.35*nC(s.chg)+0.40*nA(s.amt)+0.25*nR(s.upRatio)); });
+      all.forEach(s=>{ s.score = 100*(0.55*nC(s.chg)+0.25*nA(s.amt)+0.20*nR(s.upRatio)); });
     } else { all.forEach(s=>s.score=0); }
     const mainCandidates = all.slice().sort((a,b)=>b.score-a.score).slice(0,15);
     const main = mainCandidates.slice(0,10);
