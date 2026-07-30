@@ -898,7 +898,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="sig-method" id="sigMethod">
         <b>信号引擎说明（请先看，再验证）</b>
         <div><b>数据源与实时性（先看这个）：</b>①<b>始终实时</b>——指数涨跌、自选股/ETF 价格与涨跌来自<b>腾讯财经 qt.gtimg.cn</b>（与东方财富无关），这是核心盯盘内容，<b>不带延迟</b>；②<b>日线级</b>——自选股均线/MACD 来自<b>新浪日K</b>（判断趋势足够）；③<b>广度/行业/北向</b>来自<b>东方财富 push2</b>：本机网络到 push2 可达即<b>实时</b>，不可达时自动回落 push2delay（延迟约15~20分钟）。面板顶部「数据源状态」实时显示每个源是实时还是延迟；延迟源信号会在条件里注明“延迟广度”，且排序时自动靠后，不会排在最前误导你。</div>
-        <div><b>如何保证完全实时？</b>延迟只发生在东财 push2 不可达时。最轻量办法：在本地运行 <code>proxy_server.py</code>（单文件、Python 标准库、零依赖、CORS*），然后 <button id="proxyConfigBtn" class="proxy-config-btn">配置代理地址</button>，填入如 <code>http://localhost:8899</code>，刷新后页面即走服务端实时代理，广度/行业/北向也实时。代理脚本已放在项目目录，双击/命令行运行即可。</div>
+        <div><b>如何保证完全实时？</b>延迟只发生在东财 push2 不可达时，此时自动回落 push2delay（约 15~20 分钟），仍可用。广度/行业/北向默认已实时（push2 可达即实时），无需运行任何本地程序。如你自备可加 Referer 的代理服务，可在「数据源说明」中点击<button id="proxyConfigBtn" class="proxy-config-btn">配置代理地址</button>填入，但<b>非必需</b>。</div>
         <div><b>场外基金自动估算（全自动，零配置）：</b>页面在浏览器内直接加载东方财富公开净值数据 <code>pingzhongdata</code>（跨域可用、不校验来源），对任意自选场外基金——<b>含 QDII</b>——自动估算当日涨跌并标注「估」；QDII 自动识别并展示滞后官方净值与上一披露日收益。<b>你只需把基金加进自选，其余全自动，无需 Token、无需编辑文件、无需本地代理。</b></div>
         <div><b>可靠性保障：</b>信号经<b>多维市场状态过滤</b>——综合指数趋势、涨跌广度、广度趋势、个股中位数、主力资金流、北向六个维度判定大盘环境，与大盘环境矛盾的“单维假信号”会被降级或抑制；当广度来自延迟源时，大盘/行业类信号自动降权并标注“延迟广度”。所有信号仅供参考，不构成投资建议。</div>
         <div><b>逻辑：</b>不是 AI 预测，是规则触发。量价异动必须结合<b>均线排列、MACD 金叉/死叉、趋势位置、大盘环境</b>才出建议。例如“放量上攻”仅在均线多头+MACD金叉时才给“加仓”；高位放量给“减仓/不追”；缩量会区分“下跌中继”与“健康洗盘”。</div>
@@ -1004,8 +1004,8 @@ const STATE = {
 };
 window.STATE = STATE;   // 暴露给 framework.js（AI复盘读取自选股）
 let fastMs = 1000;
-// 实时代理：留空则直连东财/腾讯；若你运行了 proxy_server.py（单文件、标准库、无依赖、CORS*），
-// 把它设为该服务地址（如 http://你的IP:8899 ），页面即走服务端实时代理，广度/行业/北向不再滞后。
+// 实时代理（可选，默认留空）：留空则直连东财/腾讯。若你自备可加 Referer 的代理服务，
+// 可将其地址填入，页面即走该代理。纯 GitHub 云端运行无需任何代理，此项保持为空即可。
 // 可在页面「数据源说明」里点击"配置代理"按钮设置，无需改代码。
 const DATA_PROXY_URL = (function(){ try{ return localStorage.getItem('ashare_proxy_url')||''; }catch(e){ return ''; } })();
 let lastLiveTs = 0;   // 最近一次成功取到“实时”行情的时间戳（用于时效提示）
@@ -4580,20 +4580,19 @@ async function fetchFundGz(code, allowEst){
 //       push2delay（持仓股实时价/昨收算涨跌幅，浏览器 CORS 可用，复用 fetchEmQuote）
 // 说明：个股权重无法免费获取，采用等权近似；债券/现金近似持平。属近似估算，标签标注「估」。
 // ============ 场外基金：稳健数据层（替代已失效的 pingzhongdata）============
-// 数据源（均经本地代理 DATA_PROXY_URL 转发，服务端加 eastmoney Referer，绕过浏览器直连的 Referer 校验）：
-//   · 官方净值：api.fund.eastmoney.com/f10/lsjz  (JSONP callback=)
-//   · 前十大持仓：fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc  (script var apidata)
+// 数据源（全浏览器端 / 云端，无需任何本地服务）：
+//   · 净值与持仓：东方财富 pingzhongdata / fundf10 公开数据（浏览器 iframe 加载，跨域可用、不校验来源）
 //   · 持仓股实时涨跌：push2delay.eastmoney.com  (jsonpGet，复用 fetchEmQuote，无需代理)
-// 说明：api.fund / fundf10 校验 Referer（非 eastmoney 域返回 ErrCode:-999），浏览器直连被拒，必须走代理。
-//       push2delay 不校验 Referer，可直接 JSONP。若未配置代理(DATA_PROXY_URL)，估算/官方净值均不可用，
-//       页面标注「估算暂不可用」并提示配置代理。
+//   · 官方净值兜底快照：fund_estimates.json（由 GitHub Actions 服务端每日生成并推送，零本地依赖）
+// 说明：主路径为客户端直连 + GitHub Actions 快照，估算/官方净值均可在「纯 GitHub 云端」下完整运行。
+//       旧版「本地代理 DATA_PROXY_URL」仅作为可选三级回退保留（默认关闭），不使用也不影响任何功能。
 // 关键假设：用前十大持仓「占净值比例」之和反推股票占净比（前十大通常约占股票仓位 60-62%），用于缩放估算涨跌幅。
 
 function toSecid(code){ return /^6/.test(code) ? '1.'+code : '0.'+code; }
 function fundProxyUrl(host, path){
-  // 未手动配置代理时，默认尝试本机 8899（proxy_server.py 默认端口），
-  // 这样“只要本地运行了 proxy_server.py”即可直接使用，无需额外配置。
-  const base = (DATA_PROXY_URL && DATA_PROXY_URL.trim()) ? DATA_PROXY_URL.replace(/\/$/,'') : 'http://localhost:8899';
+  // 本地代理为可选三级回退（默认关闭）：仅当用户自行配置了 DATA 代理地址时才生效。
+  // 纯 GitHub 云端运行时不依赖此项；默认不再回退到本机 8899。
+  const base = (DATA_PROXY_URL && DATA_PROXY_URL.trim()) ? DATA_PROXY_URL.replace(/\/$/,'') : '';
   return base + '/proxy?host=' + encodeURIComponent(host) + '&path=' + encodeURIComponent(path);
 }
 // 官方净值（JSONP，走代理）。返回 {nav, prevNav, navDate, change_pct, change_amt, fundType}
@@ -4929,7 +4928,7 @@ async function fetchFundNav(code){
         isOfficial:true, est:false, navDate:e.navDate, isToday:(e.navDate===todayStr()), isFundGz:false, gztime:e.navDate };
     }
   }catch(e){}
-  // 回退：本地代理取数（仅本地配置 DATA_PROXY_URL 的用户）
+  // 回退：本地代理取数（可选，仅用户自行配置 DATA_PROXY_URL 时生效；默认不触发）
   const today=todayStr();
   const cacheKey='fundnav_v2_'+code+'_'+today;
   try{
@@ -5323,7 +5322,7 @@ try{
   if(proxyBtn){
     proxyBtn.addEventListener('click', ()=>{
       const cur = localStorage.getItem('ashare_proxy_url') || '';
-      const url = prompt('请输入 proxy_server.py 地址（如 http://localhost:8899）：', cur);
+      const url = prompt('请输入代理服务地址（可选，留空即纯云端直连；如 http://你的代理IP:端口）：', cur);
       if(url===null) return;
       try{ localStorage.setItem('ashare_proxy_url', url); }catch(e){}
       location.reload();
