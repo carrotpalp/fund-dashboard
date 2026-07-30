@@ -1,0 +1,61 @@
+name: Daily Dashboard Snapshot
+
+# 纯云端定时刷新 fund-dashboard 的共享静态缓存（广度 / ETF一级市场 / 板块资金流），
+# 并把 dashboard.html 模板同步为线上 index.html，最后推回 main。
+# 全部数据源走 push2delay.eastmoney.com（非中国 IP 稳定可达）；
+# 不再依赖 push2（实时端点间歇性断连）与 push2his（云端完全不可达）。
+# 与 fund-estimate.yml 并发推送 main 时，用 pull --rebase + 重试保证最终落库。
+on:
+  schedule:
+    # 北京 16:05（收盘后），周一至周五
+    - cron: '5 8 * * 1-5'
+  workflow_dispatch: {}   # 允许在 Actions 页面手动触发
+
+permissions:
+  contents: write        # 允许 GITHUB_TOKEN 把刷新结果推回仓库
+
+concurrency:
+  group: daily-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate breadth snapshot
+        run: node gen_breadth.js || true
+
+      - name: Generate ETF primary-market cache
+        run: python3 gen_etf_cache.py || true
+
+      - name: Generate sector fund-flow cache
+        run: python3 gen_sector_flow_cache.py || true
+
+      - name: Sync dashboard template -> index.html
+        run: cp dashboard.html index.html
+
+      - name: Commit and push (retry on Actions concurrency)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6; do
+            git add breadth.json etf_realtime_cache.json etf_history.json \
+                    sector_flow_history.json gen_etf_cache.status.json \
+                    index.html dashboard.html gen_etf_cache.py gen_sector_flow_cache.py gen_breadth.js
+            git commit -m "daily: 刷新广度/ETF/板块资金流快照并同步看板 $(date +%F)" -q || true
+            git pull --rebase origin main || true
+            if git push origin main 2>/dev/null; then
+              echo "push ok (attempt $i)"
+              break
+            fi
+            echo "attempt $i 被并发推送打断，重试..."
+            sleep 8
+          done

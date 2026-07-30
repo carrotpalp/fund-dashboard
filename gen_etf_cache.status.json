@@ -1,0 +1,19 @@
+{
+ "date": "2026-07-30",
+ "source": "precomputed",
+ "coverage": 6,
+ "ok": true,
+ "error": null,
+ "windowDays": 60,
+ "netAmtToday": 194.653,
+ "netShareToday": 63.819,
+ "available": [
+  "510050",
+  "510300",
+  "510500",
+  "512100",
+  "588000",
+  "159915"
+ ],
+ "missing": []
+}
