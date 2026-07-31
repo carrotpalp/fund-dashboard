@@ -703,6 +703,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
         </label>
       </span>
       <button id="resetLayout" class="layout-reset-btn" title="恢复面板默认尺寸（清空手动拖拽/缩放）">重置布局</button>
+      <button id="toggleFuzzyBtn" class="layout-reset-btn" title="显示/隐藏「AI复盘」与「重要信号」两个模块（这两项数据参考性较弱，可先藏起来；状态本地保存）">显示 AI复盘/信号</button>
       <nav class="tool-nav" aria-label="工具导航">
         <a class="tool-link active" href="trend.html" target="_blank" rel="noopener" title="四层趋势框架 · ETF/个股趋势判断">
           <span class="tool-icon">📈</span>
@@ -867,7 +868,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
   </div>
 
   <!-- Row 3.6: AI 复盘（四层框架 + 水下层，收盘后自动生成，明确建议） -->
-  <div class="gr r2">
+  <div class="gr r2" id="rowAiRecap">
     <div class="panel" style="border-color:var(--accent,#4ea1ff)">
       <div class="ph"><span class="pt">🤖 AI 复盘 <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">自动生成 · 四层框架 + 水下层(主力意图/人性博弈代理) · 明确建议</span></span>
         <span class="ps"><button id="recapBtn" class="wl-io-btn" title="重新拉取全部自选股生成复盘">重新生成</button></span></div>
@@ -876,7 +877,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
   </div>
 
   <!-- Row 4: Signals -->
-  <div class="panel rec-panel">
+  <div class="panel rec-panel" id="rowSignals">
     <div class="ph"><span class="pt">重要信号与异动监控</span><span class="ps">仅推送规则强度≥0.8 的可执行信号（大盘 / 行业 / 自选个股及ETF），实时源优先</span></div>
     <div class="pb">
       <div class="sig-config">
@@ -5729,6 +5730,27 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
   }
   if(document.readyState!=='loading') setTimeout(ssGo, 600);
   else document.addEventListener('DOMContentLoaded', ()=>setTimeout(ssGo, 600));
+})();
+</script>
+<script>
+/* 模块显隐开关：AI复盘 + 重要信号（默认隐藏，状态存 localStorage） */
+(function(){
+  try{
+    var KEY='fd_hide_fuzzy_v1';
+    var btn=document.getElementById('toggleFuzzyBtn');
+    var rows=[document.getElementById('rowAiRecap'),document.getElementById('rowSignals')].filter(Boolean);
+    function apply(hide){
+      rows.forEach(function(r){ r.style.display = hide ? 'none' : ''; });
+      if(btn){ btn.textContent = hide ? '显示 AI复盘/信号' : '隐藏 AI复盘/信号'; btn.classList.toggle('on', !hide); }
+    }
+    var raw=localStorage.getItem(KEY);
+    var hide = (raw===null) ? true : (raw==='1');   // 默认隐藏
+    apply(hide);
+    if(btn){ btn.addEventListener('click', function(){
+      hide=!hide; try{ localStorage.setItem(KEY, hide?'1':'0'); }catch(e){}
+      apply(hide);
+    }); }
+  }catch(e){ console.error('toggleFuzzy', e); }
 })();
 </script>
 </body>
