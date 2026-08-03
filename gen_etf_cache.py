@@ -174,20 +174,30 @@ def main():
         sorted_dates = sorted([k for k in cache if k < today])
         last_date = sorted_dates[-1] if sorted_dates else None
         last_per = cache[last_date]["per"] if last_date else {}
-        per_today = {}
-        for code in ETFS:
-            cur = em_per.get(code)
-            if not cur:
-                continue
-            base = (last_per.get(code, {}) or {}).get("shares", 0) or 0
-            cur = dict(cur)
-            cur["net"] = (cur["shares"] - base) if base else 0
-            cur["nav"] = cur["price"]
-            per_today[code] = cur
-        if per_today:
-            cache[today] = {"per": per_today,
-                             "ts": int(datetime.datetime.now().timestamp() * 1000),
-                             "_source": "eastmoney" if not FORCE_SNAPSHOT else "snapshot"}
+        # 盘中保护：东财 f84(总份额)在每个交易日收盘结算后才更新；盘中跑会得到与
+        # 上一已结算日相同的份额，做差分必然得 0 → 产生虚假"当日净申赎=0"。
+        # 检测：6 只 ETF 的当前 f84 == 上一日 f84 → 东财未更新 → 跳过今日，沿用 last_date 为最新。
+        all_unchanged = bool(last_per) and all(
+            em_per.get(c) and em_per[c]["shares"] == (last_per.get(c, {}) or {}).get("shares")
+            for c in ETFS
+        )
+        if all_unchanged:
+            print(f"  push2delay f84 尚未更新({today} 仍 = {last_date} 收盘值)，跳过今日，沿用 {last_date} 为最新")
+        else:
+            per_today = {}
+            for code in ETFS:
+                cur = em_per.get(code)
+                if not cur:
+                    continue
+                base = (last_per.get(code, {}) or {}).get("shares", 0) or 0
+                cur = dict(cur)
+                cur["net"] = (cur["shares"] - base) if base else 0
+                cur["nav"] = cur["price"]
+                per_today[code] = cur
+            if per_today:
+                cache[today] = {"per": per_today,
+                                 "ts": int(datetime.datetime.now().timestamp() * 1000),
+                                 "_source": "eastmoney" if not FORCE_SNAPSHOT else "snapshot"}
 
     # 2) 上证指数收盘（右轴参考）——云端用 push2delay 取当日收盘，历史从 etf_history.json 顶层 'sh' 持久化字典读取
     dates = sorted([k for k in cache if k.startswith("2026-")])
