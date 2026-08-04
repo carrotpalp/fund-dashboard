@@ -586,6 +586,10 @@ html.light .theme-btn::after{content:'☀️';left:16px}
 .sector-tab{font-size:11px;padding:4px 10px;border-radius:4px;background:var(--bg-panel2);border:1px solid var(--border);color:var(--text-2);cursor:pointer;transition:all .15s}
 .sector-tab:hover{border-color:var(--border-light);color:var(--text-1)}
 .sector-tab.active{background:rgb(from var(--accent) r g b /.15);border-color:rgb(from var(--accent) r g b /.4);color:var(--blue);font-weight:600}
+.div-filter{display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap}
+.df-chip{font-size:11px;padding:3px 9px;border-radius:4px;background:var(--bg-panel2);border:1px solid var(--border);color:var(--text-2);cursor:pointer;transition:all .15s;user-select:none}
+.df-chip:hover{border-color:var(--border-light);color:var(--text-1)}
+.df-chip.active{background:rgb(from var(--accent) r g b /.15);border-color:rgb(from var(--accent) r g b /.4);color:var(--blue);font-weight:600}
 .sector-top{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
 .sector-top-col{background:var(--bg-panel2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
 .sector-top-h{font-size:11px;color:var(--text-2);display:flex;align-items:center;justify-content:space-between}
@@ -813,6 +817,12 @@ html.light .theme-btn::after{content:'☀️';left:16px}
     </div>
     <div class="panel div-panel">
       <div class="ph"><span class="pt">资金-价格背离监控</span><span class="ps" id="divSub">资金流入但涨幅滞后的板块</span></div>
+      <div class="div-filter" id="divFilter">
+        <span class="df-chip active" data-mode="all">全部</span>
+        <span class="df-chip" data-mode="hot10" title="按成交额(亿元)取前10最活跃板块">热度前10</span>
+        <span class="df-chip" data-mode="watch" title="我手动关注的板块(在「重要信号」模块添加)">我关注的板块</span>
+        <span class="df-chip" data-mode="hot10watch">自选+热度</span>
+      </div>
       <div class="pb"><div class="div-list" id="divList"></div></div>
     </div>
   </div>
@@ -1281,7 +1291,7 @@ async function loadIndices(){
   return out;
 }
 async function loadIndustries(){
-  const fields = "f2,f3,f4,f9,f12,f14,f20,f21,f23,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f104,f105,f136,f140,f141";
+  const fields = "f2,f3,f4,f9,f12,f14,f20,f21,f23,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f104,f105,f6,f136,f140,f141";
   const d = await emJsonp({pn:"1",pz:"100",po:"1",np:"1",fltt:"2",invt:"2",fs:"m:90+t:2",fields});
   const items = (d && d.data && d.data.diff) || [];
   return items.map(it=>({
@@ -1290,6 +1300,7 @@ async function loadIndustries(){
     pe:parseFloat(it.f9)||0, pb:parseFloat(it.f23)||0,
     total_mcap_yi:(parseFloat(it.f20)||0)/1e8, float_mcap_yi:(parseFloat(it.f21)||0)/1e8,
     main_net:parseFloat(it.f62)||0, main_net_pct:parseFloat(it.f184)||0,
+    amount_yi:parseFloat(it.f6)||0,   // 成交额(亿元)，用于"热度前10"排序
     super_large_net:parseFloat(it.f66)||0, large_net:parseFloat(it.f72)||0,
     medium_net:parseFloat(it.f78)||0, small_net:parseFloat(it.f84)||0,
     up_count:parseInt(it.f104||0), down_count:parseInt(it.f105||0),
@@ -2211,7 +2222,7 @@ function computeDivergence(industries){
       type='hold'; action='hold'; actLabel='持有';
       desc = `主力${flow>=0?'净流入':'净流出'} ${Math.abs(flow).toFixed(1)}亿，涨跌 ${sign(chg)}${chg.toFixed(2)}%，资金和价格同步，没有明显机会，持股不动。`;
     }
-    return {name:ind.name, code:ind.code, change_pct:chg, main_net_yi:flow, divergence_score:score, type, action, actLabel, desc};
+    return {name:ind.name, code:ind.code, change_pct:chg, main_net_yi:flow, divergence_score:score, amount_yi:ind.amount_yi||0, type, action, actLabel, desc};
   });
   // 计算偏离度在所有板块中的前百分之分位（越靠前越极端）
   const total = divs.length;
@@ -2221,7 +2232,7 @@ function computeDivergence(industries){
     d.topPct = total ? Math.max(1, Math.round((1 - smaller/total)*100)) : 0;
   });
   divs.sort((a,b)=>Math.abs(b.divergence_score)-Math.abs(a.divergence_score));
-  return divs.filter(d=>Math.abs(d.divergence_score)>0.3);
+  return divs;
 }
 
 function getSignalSectors(){
@@ -2770,8 +2781,45 @@ function divergenceStrength(d){
   return '同步';
 }
 function renderDivergence(){
-  const divs = computeDivergence(STATE.industries||[]).slice(0,15);
-  if(!divs.length){ document.getElementById('divList').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">暂无明显资金-价格背离信号</div>'; return; }
+  // 筛选交互：仅绑定一次；从 localStorage 恢复选中态
+  if(!window.__divFilterBound){
+    window.__divFilterBound = true;
+    const saved = (function(){ try{ return localStorage.getItem('DIV_FILTER'); }catch(e){ return null; } })();
+    if(saved) STATE.divFilter = saved;
+    const box = document.getElementById('divFilter');
+    if(box){
+      box.addEventListener('click', function(e){
+        const chip = e.target.closest('.df-chip'); if(!chip) return;
+        const m = chip.getAttribute('data-mode');
+        STATE.divFilter = m;
+        try{ localStorage.setItem('DIV_FILTER', m); }catch(err){}
+        box.querySelectorAll('.df-chip').forEach(c=>c.classList.toggle('active', c.getAttribute('data-mode')===m));
+        renderDivergence();
+      });
+      // 同步初始高亮
+      const cur = (typeof STATE.divFilter==='string' && STATE.divFilter) ? STATE.divFilter : 'all';
+      box.querySelectorAll('.df-chip').forEach(c=>c.classList.toggle('active', c.getAttribute('data-mode')===cur));
+    }
+  }
+  // 筛选模式：all=全部(原行为) / hot10=热度前10(按成交额) / watch=我关注的板块(手动SIG_SECTORS) / hot10watch=并集
+  const mode = (typeof STATE.divFilter==='string' && STATE.divFilter) ? STATE.divFilter : 'all';
+  const allDivs = computeDivergence(STATE.industries||[]);
+  let divs = allDivs;
+  if(mode==='hot10'){
+    divs = allDivs.slice().sort((a,b)=>(b.amount_yi||0)-(a.amount_yi||0)).slice(0,10);
+  }else if(mode==='watch'){
+    const ws = getSignalSectors();   // 复用重要信号模块的"关注板块"(SIG_SECTORS)，避免重复实现
+    if(!ws.length){ document.getElementById('divList').innerHTML='<div style="text-align:center;padding:18px;color:var(--text-3);font-size:12px">你还没设置"关注板块"。<br>在「重要信号」模块点 + 添加，或切到「热度前10」。<br><span style="color:var(--text-3)">（注：免费数据源无法自动把自选股反查到行业板块，故用你手动关注的板块作替代）</span></div>'; return; }
+    divs = allDivs.filter(d=> ws.some(s=> d.name.includes(s) || s.includes(d.name)));
+  }else if(mode==='hot10watch'){
+    const ws = getSignalSectors();
+    const hot = allDivs.slice().sort((a,b)=>(b.amount_yi||0)-(a.amount_yi||0)).slice(0,10);
+    const wset = ws.length ? allDivs.filter(d=> ws.some(s=> d.name.includes(s) || s.includes(d.name))) : [];
+    const seen=new Set(); divs=[]; hot.concat(wset).forEach(d=>{ if(!seen.has(d.name)){ seen.add(d.name); divs.push(d); } });
+  }else{
+    divs = allDivs.filter(d=>Math.abs(d.divergence_score)>0.3).slice(0,15);  // 原默认行为
+  }
+  if(!divs.length){ document.getElementById('divList').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">当前筛选下暂无明显信号</div>'; return; }
   document.getElementById('divList').innerHTML = divs.map(d=>{
     const cls = d.type==='inflow'?'inflow':d.type==='outflow'?'outflow':'normal';
     const actCls = d.action==='buy'?'buy':d.action==='sell'?'sell':'hold';
@@ -5099,6 +5147,7 @@ async function loadViaProxy(){
       pe:parseFloat(it.pe)||0, pb:parseFloat(it.pb)||0,
       total_mcap_yi:parseFloat(it.total_mcap_yi)||0, float_mcap_yi:parseFloat(it.float_mcap_yi)||0,
       main_net:parseFloat(it.main_net)||0, main_net_pct:parseFloat(it.main_net_pct)||0,
+      amount_yi:parseFloat(it.amount_yi)||0,
       super_large_net:parseFloat(it.super_large_net)||0, large_net:parseFloat(it.large_net)||0,
       medium_net:parseFloat(it.medium_net)||0, small_net:parseFloat(it.small_net)||0,
       up_count:parseInt(it.up_count||0), down_count:parseInt(it.down_count||0),
