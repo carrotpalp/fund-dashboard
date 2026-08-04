@@ -26,7 +26,7 @@ OUT = os.path.join(HERE, "sector_flow_history.json")
 
 URL = (
     "https://push2delay.eastmoney.com/api/qt/clist/get?pn=1&pz=300&po=1&np=1&fltt=2&invt=2"
-    "&fs=m:90+t:2&fields=f12,f14,f62"
+    "&fs=m:90+t:2&fields=f12,f14,f62,f2,f3"
 )
 KEEP_DAYS = 120
 # 全部板块主力净流入绝对值合计低于该值(元)视为非交易时段/休市，跳过
@@ -108,9 +108,13 @@ def main():
             code = str(it.get("f12") or "")
             name = str(it.get("f14") or "")
             net = float(it.get("f62") or 0)
+            price = float(it.get("f2") or 0)     # 最新价(快照≈收盘)
+            chg = float(it.get("f3") or 0)       # 涨跌幅(%)，fltt=2 已归一化
             if not code:
                 continue
-            entry[code] = {"n": round(net / 1e8, 2), "name": name}
+            # p=收盘价、c=当日涨跌幅(%)，供浏览器重建价格序列、计算 N 日趋势位置（与 .n 并存，向后兼容）
+            entry[code] = {"n": round(net / 1e8, 2), "name": name,
+                           "p": round(price, 3), "c": round(chg, 2)}
             total_abs += abs(net)
 
         # 合计主力净流入过小 -> 视为休市/未开盘，跳过以免写入 0 污染历史

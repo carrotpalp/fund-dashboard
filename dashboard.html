@@ -816,7 +816,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       </div>
     </div>
     <div class="panel div-panel">
-      <div class="ph"><span class="pt">资金-价格背离监控</span><span class="ps" id="divSub">资金流入但涨幅滞后的板块</span></div>
+      <div class="ph"><span class="pt">资金-价格背离监控</span><span class="ps" id="divSub">20日资金流 · 价格趋势 背离扫描</span></div>
       <div class="div-filter" id="divFilter">
         <span class="df-chip active" data-mode="all">全部</span>
         <span class="df-chip" data-mode="hot10" title="按成交额(亿元)取前10最活跃板块">热度前10</span>
@@ -2188,51 +2188,102 @@ function etfPrimRenderKpis(){
 }
 
 /* ===================== 计算 ===================== */
+function buildSectorSeries(code){
+  // 从板块资金流历史(每日收盘快照) + 当日实时，重建最近 N 日序列（收盘价/涨跌幅/主力净流入）
+  const hist = STATE.sectorFlowHist;
+  const tz = shanghaiToday();
+  const dayKeys = (hist && hist.days) ? Object.keys(hist.days).sort() : [];
+  const allDays = dayKeys.slice();
+  if(!allDays.includes(tz)) allDays.push(tz);   // 当日用实时值补齐
+  const live = (STATE.industries||[]).find(s=>s.code===code);
+  const series = [];
+  for(const day of allDays){
+    let net, price, chg;
+    if(day===tz){
+      if(live){ net=+(live.main_net/1e8).toFixed(2); price=live.price; chg=live.change_pct; }
+      else if(hist.days[tz] && hist.days[tz][code]){ const e=hist.days[tz][code]; net=e.n; price=e.p; chg=e.c; }
+      else continue;
+    }else{
+      const e = hist.days[day] && hist.days[day][code];
+      if(!e) continue;
+      net=e.n; price=e.p; chg=e.c;
+    }
+    if(!price || isNaN(price) || price<=0) continue;  // 价格缺失(历史升级前旧格式)则跳过该日，不影响后续新格式日累积
+    series.push({date:day, net, price, chg});
+  }
+  return series.slice(-20);   // 默认 20 日窗口
+}
+
 function computeDivergence(industries){
   if(!industries || !industries.length) return [];
-  const changes = industries.map(i=>i.change_pct||0);
-  const flows = industries.map(i=>(i.main_net||0)/1e8);
-  const mean = a => a.reduce((s,x)=>s+x,0)/a.length;
-  const avgC = mean(changes), stdC = Math.sqrt(mean(changes.map(c=>(c-avgC)**2))) || 1;
-  const avgF = mean(flows), stdF = Math.sqrt(mean(flows.map(f=>(f-avgF)**2))) || 1;
-  // 尺度校准(第四点优化)：资金流离散度(std 常达数十亿)远大于涨跌幅离散度(std 不足1%)，各自 z-score 差分会被资金维放大→普涨/普跌日批量假阳性。
-  // 改用百分位排名(0~1)替代 z-score，使两维落在同一尺度再相减，消除量纲失衡。
-  const rankPct = (v, arr) => { const n = arr.length; if(!n) return 0.5; const less = arr.filter(x=>x<v).length, eq = arr.filter(x=>x===v).length; return (less + eq/2)/n; };
-  const chgRank = changes.map(c=>rankPct(c, changes));
-  const flowRank = flows.map(f=>rankPct(f, flows));
-  const divs = industries.map((ind,i)=>{
-    const chg = changes[i], flow = flows[i];
-    const zC = chgRank[i], zF = flowRank[i];   // 百分位排名(0~1)，已消除尺度失衡
-    const score = zF - zC;            // ∈[-1,1]；>0 资金相对价格更强；<0 资金相对价格更弱
-    const inflow = flow > 0;
-    let type='hold', action='hold', actLabel='持有', desc='';
-    if(inflow && score > 0.6){          // 资金明显流入且强于涨幅 → 看涨背离（阈值随百分位尺度适配，原0.8在百分位下过严）
-      type='inflow'; action='buy'; actLabel='买入';
-      desc = `大资金在悄悄进货：主力净流入 ${flow.toFixed(1)}亿，但价格只${chg>=0?'涨了':'跌了'} ${fmt2(Math.abs(chg))}%，涨幅明显落后于资金，后面有补涨空间，可逢低买入。`;
-    }else if(inflow && score > 0.3){
-      type='inflow'; action='buy'; actLabel='关注';
-      desc = `有资金在持续买入：主力净流入 ${flow.toFixed(1)}亿，价格${chg>=0?'涨了':'跌了'} ${fmt2(Math.abs(chg))}%，资金比价格更积极，值得关注。`;
-    }else if(!inflow && score < -0.6){   // 资金流出但价格跌幅相对较浅 → 看跌背离（阈值随百分位尺度适配）
-      type='outflow'; action='sell'; actLabel='减仓';
-      desc = `主力在偷偷出货：净流出 ${Math.abs(flow).toFixed(1)}亿，但价格还没跌透（${chg>=0?'甚至还在涨':'只跌了'+fmt2(Math.abs(chg))+'%'}），后面容易补跌，建议减仓。`;
-    }else if(!inflow && score < -0.3){
-      type='outflow'; action='sell'; actLabel='规避';
-      desc = `资金持续流出：净流出 ${Math.abs(flow).toFixed(1)}亿，价格${chg>=0?'还在涨':'跌了'+fmt2(Math.abs(chg))+'%'}，短期缺乏买盘支撑，先避开。`;
+  const hist = STATE.sectorFlowHist;
+  const haveHist = !!(hist && hist.days && Object.keys(hist.days).length);
+  const CAP_NET = 30;   // 亿元：累计净额强度归一化软上限
+  const PCT_CAP = 8;    // %：窗口价格涨跌强度归一化软上限
+  const out = [];
+  for(const ind of industries){
+    const code = ind.code;
+    const series = haveHist ? buildSectorSeries(code) : [];
+    const todayNet = (ind.main_net||0)/1e8;
+    const todayChg = ind.change_pct||0;
+    let cumNet, priceChg, trendPos, winDays, insufficient;
+    if(series.length >= 3){
+      // 真时间序列：N 日累计主力净流入 + N 日价格涨跌 + 价位相对 N 日均线位置
+      const nets = series.map(s=>s.net), prices = series.map(s=>s.price);
+      cumNet = nets.reduce((a,b)=>a+b,0);
+      const firstP = prices[0], lastP = prices[prices.length-1];
+      priceChg = (lastP/firstP - 1)*100;
+      const ma = prices.reduce((a,b)=>a+b,0)/prices.length;
+      trendPos = (lastP/ma - 1)*100;
+      winDays = series.length; insufficient = false;
     }else{
-      type='hold'; action='hold'; actLabel='持有';
-      desc = `主力${flow>=0?'净流入':'净流出'} ${Math.abs(flow).toFixed(1)}亿，涨跌 ${sign(chg)}${chg.toFixed(2)}%，资金和价格同步，没有明显机会，持股不动。`;
+      // 历史不足：退化为当日近似（仅当天 资金流 vs 价格），标注弱信号、排后面
+      cumNet = todayNet; priceChg = todayChg; trendPos = 0; winDays = 1; insufficient = true;
     }
-    return {name:ind.name, code:ind.code, change_pct:chg, main_net_yi:flow, divergence_score:score, amount_yi:ind.amount_yi||0, type, action, actLabel, desc};
-  });
-  // 计算偏离度在所有板块中的前百分之分位（越靠前越极端）
-  const total = divs.length;
-  const absScores = divs.map(d=>Math.abs(d.divergence_score));
-  divs.forEach(d=>{
-    const smaller = absScores.filter(a=>a < Math.abs(d.divergence_score)).length;
-    d.topPct = total ? Math.max(1, Math.round((1 - smaller/total)*100)) : 0;
-  });
-  divs.sort((a,b)=>Math.abs(b.divergence_score)-Math.abs(a.divergence_score));
-  return divs;
+    // 经典背离：资金方向 与 价格方向 相反；趋势位置(相对均线)用于放大/弱化信号
+    const flowDir = cumNet > 0.5 ? 1 : (cumNet < -0.5 ? -1 : 0);
+    const priceDir = priceChg > 0.5 ? 1 : (priceChg < -0.5 ? -1 : 0);
+    const netMag = Math.min(1, Math.abs(cumNet)/CAP_NET);
+    const chgMag = Math.min(1, Math.abs(priceChg)/PCT_CAP);
+    let score=0, type='sync', tone='hold', label='同步', desc='';
+    if(flowDir>0 && priceDir<0){
+      // 资金流入 + 价格下跌 = 看多背离（吸筹）
+      let intensity = netMag*chgMag;
+      if(trendPos < -8){ label='低位吸筹·关注'; intensity=Math.min(1,intensity*1.3); }
+      else if(trendPos > 8){ label='逆势流入·留意'; intensity*=0.6; }
+      else label='资金逆势流入·关注';
+      tone='watch-up'; score=intensity;
+      desc=`近${winDays}日主力累计净流入 ${cumNet.toFixed(1)}亿，但板块价格${priceChg.toFixed(2)}%（${trendPos.toFixed(1)}% vs 20日均线），资金在下跌中悄悄承接，属看多背离${insufficient?'（历史不足，按当日近似）':''}。低位可留意逢低布局。`;
+    }else if(flowDir<0 && priceDir>0){
+      // 资金流出 + 价格上涨 = 看空背离（派发）
+      let intensity = netMag*chgMag;
+      if(trendPos > 8){ label='高位派发·警惕'; intensity=Math.min(1,intensity*1.3); }
+      else if(trendPos < -8){ label='资金流出·观察'; intensity*=0.6; }
+      else label='资金逢高减持·警惕';
+      tone='warn-down'; score=-intensity;
+      desc=`近${winDays}日主力累计净流出 ${Math.abs(cumNet).toFixed(1)}亿，但板块价格仍${priceChg.toFixed(2)}%（${trendPos.toFixed(1)}% vs 20日均线），上涨靠存量推动、主力逢高派发，属看空背离${insufficient?'（历史不足，按当日近似）':''}。高位注意兑现风险。`;
+    }else if(flowDir>0 && priceDir>0){
+      label = trendPos>8 ? '强势·高位' : '同步走强';
+      tone = trendPos>8 ? 'warn-up' : 'sync-up';
+      desc=`近${winDays}日主力累计净流入 ${cumNet.toFixed(1)}亿、价格${priceChg.toFixed(2)}%，量价同步向上${trendPos>8?'（已处20日高位，注意追高风险）':''}。`;
+    }else if(flowDir<0 && priceDir<0){
+      label = trendPos<-8 ? '弱势·低位' : '同步走弱';
+      tone = trendPos<-8 ? 'warn-down' : 'sync-down';
+      desc=`近${winDays}日主力累计净流出 ${Math.abs(cumNet).toFixed(1)}亿、价格${priceChg.toFixed(2)}%，量价同步向下${trendPos<-8?'（已处20日低位，恐慌出清中）':''}。`;
+    }else{
+      label='同步'; tone='hold';
+      desc=`近${winDays}日主力累计${cumNet>=0?'净流入':'净流出'} ${Math.abs(cumNet).toFixed(1)}亿、价格${priceChg.toFixed(2)}%，资金与价格方向大体一致，暂无明显背离。`;
+    }
+    out.push({
+      name: ind.name, code,
+      change_pct: todayChg, main_net_yi: todayNet, amount_yi: ind.amount_yi||0,
+      cum_net_yi: cumNet, price_chg20: priceChg, trend_pos: trendPos, win_days: winDays, insufficient,
+      divergence_score: score, type, action: tone, actLabel: label, desc
+    });
+  }
+  // 排序：真背离(|score|>0)按强度在前，同步/数据不足在后
+  out.sort((a,b)=> Math.abs(b.divergence_score)-Math.abs(a.divergence_score) || (a.insufficient?1:0)-(b.insufficient?1:0));
+  return out;
 }
 
 function getSignalSectors(){
@@ -2448,26 +2499,27 @@ function computeSignals(){
     const divs = computeDivergence(indus);
     for(const d of divs){
       if(hasFilter && !isSignalSector(d.name)) continue;
-      if(d.action==='buy' && d.type==='inflow'){
+      if(d.insufficient) continue;                       // 历史不足：N日序列未成形，不出背离信号
+      if(d.divergence_score > 0){                        // 看多背离（N日资金流入 + 价格落后/下跌）
         const rankChg = chgRank(d.name);
         const isLagging = d.change_pct < avgChg && rankChg > Math.ceil(indus.length*0.3);
         const freefall = shChg < -1.5; // 大盘主跌段：缩量多为中继，不抄底
         if(isLagging && !freefall && !regimeBear){
           add('bullish','资金背离·买',`${d.name} 资金流入价格未跟`,
-            `${d.name} 主力净流入${d.main_net_yi.toFixed(1)}亿，价格却仅涨${d.change_pct.toFixed(2)}%（落后均值）——「资金抢筹、价格滞后」的低吸形态。缩量回踩不破前低可买；注：缩量本身中性，仅长期下跌后的缩量才具见底价值。`,
+            `${d.name} 近${d.win_days}日主力累计净流入${d.cum_net_yi.toFixed(1)}亿，价格却仅${d.change_pct.toFixed(2)}%（${d.trend_pos.toFixed(1)}% vs 20日均线）——「资金抢筹、价格滞后」的低吸形态。缩量回踩不破前低可买；注：缩量本身中性，仅长期下跌后的缩量才具见底价值。`,
             '买入', d.name, 'high', 0.83,CONF,'中期',0.83,`主力净流入 + 价格滞后 + 非大盘主跌 + 状态=${REG.regime}`,true);
         }else if(freefall || regimeBear){
           add('bullish','资金背离·买',`${d.name} 资金流入（偏空环境·中继）`,
-            `${d.name} 主力净流入${d.main_net_yi.toFixed(1)}亿，但${freefall?'大盘处于主跌段':'多维状态('+REG.regime+')偏空'}，缩量多为下跌中继而非见底。不抄底，等企稳。`,
+            `${d.name} 近${d.win_days}日主力累计净流入${d.cum_net_yi.toFixed(1)}亿，但${freefall?'大盘处于主跌段':'多维状态('+REG.regime+')偏空'}，缩量多为下跌中继而非见底。不抄底，等企稳。`,
             '观望', d.name, 'low', 0.6,CONF,'中期',0.6,`主力净流入 但 ${freefall?'大盘主跌':'状态='+REG.regime}（中继，不输出）`,true);
         }else{
           add('bullish','资金背离·买',`${d.name} 资金流入`,
-            `${d.name} 主力净流入${d.main_net_yi.toFixed(1)}亿，价格同步走强，属正常共振，持续观察。`,
+            `${d.name} 近${d.win_days}日主力累计净流入${d.cum_net_yi.toFixed(1)}亿，价格同步走强，属正常共振，持续观察。`,
             '关注', d.name, 'low', 0.62,CONF,'中期',0.62,`主力净流入+价格同步（确定性不足，不输出）`,true);
         }
-      }else if(d.action==='sell' && d.type==='outflow'){
+      }else if(d.divergence_score < 0){                  // 看空背离（N日资金流出 + 价格硬撑）
         add('bearish','资金背离·卖',`${d.name} 资金撤离价格硬撑`,
-          `${d.name} 主力净流出${Math.abs(d.main_net_yi).toFixed(1)}亿，价格跌幅远未反映资金出逃，典型“价硬撑、钱已走”，补跌风险高。逢高减仓。`,
+          `${d.name} 近${d.win_days}日主力累计净流出${Math.abs(d.cum_net_yi).toFixed(1)}亿，价格却仍${d.change_pct.toFixed(2)}%（${d.trend_pos.toFixed(1)}% vs 20日均线），典型“价硬撑、钱已走”，补跌风险高。逢高减仓。`,
           '减仓', d.name, 'high', 0.85,CONF,'短期',0.85,`主力净流出 + 价格硬撑（补跌风险）`,true);
       }
     }
@@ -2775,9 +2827,9 @@ function renderHeat(){
   }).join('');
 }
 function divergenceStrength(d){
-  const top = d.topPct || 0;
-  if(top<=10) return `前 ${top}% 显著`;
-  if(top<=30) return `前 ${top}% 轻度`;
+  const s = Math.abs(d.divergence_score||0);
+  if(s>=0.6) return '显著背离';
+  if(s>=0.3) return '轻度背离';
   return '同步';
 }
 function renderDivergence(){
@@ -2801,8 +2853,9 @@ function renderDivergence(){
       box.querySelectorAll('.df-chip').forEach(c=>c.classList.toggle('active', c.getAttribute('data-mode')===cur));
     }
   }
-  // 筛选模式：all=全部(原行为) / hot10=热度前10(按成交额) / watch=我关注的板块(手动SIG_SECTORS) / hot10watch=并集
+  // 筛选模式：all=全部(按背离强度) / hot10=热度前10 / watch=我关注的板块 / hot10watch=并集
   const mode = (typeof STATE.divFilter==='string' && STATE.divFilter) ? STATE.divFilter : 'all';
+  const haveHist = !!(STATE.sectorFlowHist && STATE.sectorFlowHist.days && Object.keys(STATE.sectorFlowHist.days).length);
   const allDivs = computeDivergence(STATE.industries||[]);
   let divs = allDivs;
   if(mode==='hot10'){
@@ -2817,22 +2870,28 @@ function renderDivergence(){
     const wset = ws.length ? allDivs.filter(d=> ws.some(s=> d.name.includes(s) || s.includes(d.name))) : [];
     const seen=new Set(); divs=[]; hot.concat(wset).forEach(d=>{ if(!seen.has(d.name)){ seen.add(d.name); divs.push(d); } });
   }else{
-    divs = allDivs.filter(d=>Math.abs(d.divergence_score)>0.3).slice(0,15);  // 原默认行为
+    divs = allDivs.filter(d=>Math.abs(d.divergence_score)>0.2).slice(0,15);  // 仅展示有真实背离强度的
   }
-  if(!divs.length){ document.getElementById('divList').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">当前筛选下暂无明显信号</div>'; return; }
+  if(!divs.length){ document.getElementById('divList').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">'+(haveHist?'当前筛选下暂无明显背离信号':'历史数据累积中（每日收盘后自动快照），暂无可统计的 N 日资金流/价格序列。')+'</div>'; return; }
   document.getElementById('divList').innerHTML = divs.map(d=>{
-    const cls = d.type==='inflow'?'inflow':d.type==='outflow'?'outflow':'normal';
-    const actCls = d.action==='buy'?'buy':d.action==='sell'?'sell':'hold';
-    const simpleLabel = d.action==='buy' ? '资金抢筹' : (d.action==='sell' ? '资金出逃' : '同步');
+    const isBull = d.action==='watch-up';
+    const isBear = d.action==='warn-down'||d.action==='watch-down';
+    const cls = isBull ? 'inflow' : isBear ? 'outflow' : 'normal';
+    const actCls = isBull ? 'buy' : (d.action==='warn-down') ? 'sell' : 'hold';
+    const simpleLabel = d.divergence_score>0 ? '看多背离' : (d.divergence_score<0 ? '看空背离' : '同步');
     return `<div class="div-item ${cls}">
       <div class="di-h"><span class="di-name">${d.name}</span>
         <span style="display:flex;gap:6px;align-items:center">
           <span class="di-act ${actCls}">${d.actLabel}</span>
-          <span class="di-score" title="资金-价格偏离度 ${sign(d.divergence_score)}${d.divergence_score.toFixed(2)}，领先 ${d.topPct}% 的板块">${simpleLabel}</span>
+          <span class="di-score" title="${simpleLabel} · 近${d.win_days}日累计主力${d.cum_net_yi>=0?'净流入':'净流出'}${Math.abs(d.cum_net_yi).toFixed(1)}亿 · 价格${d.price_chg20.toFixed(2)}% · 价位${d.trend_pos.toFixed(1)}% vs 20日均线${d.insufficient?'（当日近似）':''}">${simpleLabel}</span>
         </span></div>
       <div class="di-stats">
-        <span>涨跌 <span class="${d.change_pct>0?'up-c':'down-c'}">${sign(d.change_pct)}${fmt2(d.change_pct)}%</span></span>
-        <span>主力 <span class="${d.main_net_yi>0?'up-c':'down-c'}">${sign(d.main_net_yi)}${fmt1(d.main_net_yi)}亿</span></span>
+        <span>当日 <span class="${d.change_pct>0?'up-c':'down-c'}">${sign(d.change_pct)}${fmt2(d.change_pct)}%</span></span>
+        <span>当日主力 <span class="${d.main_net_yi>0?'up-c':'down-c'}">${sign(d.main_net_yi)}${fmt1(d.main_net_yi)}亿</span></span>
+      </div>
+      <div class="di-stats">
+        <span>${d.win_days}日累计 <b class="${d.cum_net_yi>0?'up-c':'down-c'}">${sign(d.cum_net_yi)}${fmt1(d.cum_net_yi)}亿</b></span>
+        <span>价位 vs 均线 <b class="${d.trend_pos>0?'up-c':'down-c'}">${sign(d.trend_pos)}${fmt1(d.trend_pos)}%</b></span>
       </div>
       <div class="di-desc">${d.desc}</div>
     </div>`;
@@ -3021,6 +3080,38 @@ function renderSectorTop(){
   };
   el.innerHTML = mk(inflow, 'up-c', '主力流入') + mk(outflow, 'down-c', '主力流出');
 }
+function predictFullDayAmt(){
+  // 基于当前沪深成交额(STATE.totalAmt, 亿元)按交易时段进度线性推算全天
+  const now = new Date();
+  const mins = now.getHours()*60 + now.getMinutes();
+  const open=570, amEnd=690, pmStart=780, close=900, total=240;
+  let elapsed;
+  if(mins<open) return null;
+  else if(mins<=amEnd) elapsed=mins-open;
+  else if(mins<pmStart) elapsed=amEnd-open;            // 午休：只计上午
+  else if(mins<=close) elapsed=(amEnd-open)+(mins-pmStart);
+  else elapsed=total;
+  if(elapsed<=0) return null;
+  const frac=elapsed/total;
+  if(frac<0.02) return null;                            // 刚开盘，推算无意义
+  const cur = STATE.totalAmt||0;
+  if(!cur || isNaN(cur)) return null;
+  return { pred: cur/frac, frac };
+}
+function amtCardHTML(){
+  const amt = STATE.totalAmt;
+  const amtTxt = (typeof amt==='number' && !isNaN(amt)) ? (amt>=10000 ? (amt/10000).toFixed(2)+'万亿' : amt.toFixed(0)+'亿') : '—';
+  let predHtml='';
+  const pr = predictFullDayAmt();
+  if(pr){
+    const pTxt = pr.pred>=10000 ? (pr.pred/10000).toFixed(2)+'万亿' : pr.pred.toFixed(0)+'亿';
+    predHtml = `<div style="font-size:11px;color:var(--text-2);margin-top:5px">预计全天 <b style="color:var(--text-1);font-family:var(--mono)">${pTxt}</b> · 线性推算(${(pr.frac*100).toFixed(0)}%时段)</div>`;
+  }
+  return `<div class="bm-card"><div class="bm-h"><span>全市场成交额</span></div>
+    <div class="bm-median-val" style="color:var(--text-1);font-size:24px">${amtTxt}</div>
+    ${predHtml}
+    <div class="bm-median-sub">沪深合计 · 来自核心指数</div></div>`;
+}
 function renderBreadth(){
   const el = document.getElementById('breadthBody');
   if(!el) return;
@@ -3047,7 +3138,7 @@ function renderBreadth(){
       <div class="bm-median-val" style="color:${R_COLOR};font-size:24px">${R_ARROW} ${R_NAME}</div>
       <div class="bm-median-sub">多维综合得分 ${R_SCORE} · 等待全市场数据…</div></div>
       <div class="bm-card"><div class="bm-h"><span>市场中位数</span></div><div class="bm-median-val" style="color:var(--text-3);font-size:24px">—</div><div class="bm-median-sub">枚举全市场中…</div></div>
-      <div class="bm-card"><div class="bm-h"><span>全市场成交额</span></div><div class="bm-median-val" style="color:var(--text-1);font-size:24px">${amtTxt}</div><div class="bm-median-sub">沪深合计 · 来自核心指数</div></div>`;
+      <div class="bm-card">${amtCardHTML()}</div>`;
     return;
   }
   const up=br.up||0, down=br.down||0, flat=br.flat||0, total3=up+down+flat||1;
@@ -3068,11 +3159,7 @@ function renderBreadth(){
       <div class="bm-median-val ${medCls}">${medArrow} ${medTxt}</div>
       <div class="bm-median-sub">全市场个股涨跌幅中位数 · 东财逐股实时计算</div>
     </div>
-    <div class="bm-card">
-      <div class="bm-h"><span>全市场成交额</span></div>
-      <div class="bm-median-val" style="color:var(--text-1);font-size:24px">${amtTxt}</div>
-      <div class="bm-median-sub">沪深合计 · 来自核心指数</div>
-    </div>`;
+    <div class="bm-card">${amtCardHTML()}</div>`;
   renderDistribution();
 }
 let _distSig = '';
@@ -5172,7 +5259,7 @@ async function fastCycle(){
     // 连续净流入/净流出榜：历史快照仅加载一次，加载完成后刷新榜单
     if(!_sectorHistLoaded){
       _sectorHistLoaded = true;
-      loadSectorFlowHist().then(()=>renderSectorStreak()).catch(()=>{});
+      loadSectorFlowHist().then(()=>{ try{renderSectorStreak();}catch(e){} try{renderDivergence();}catch(e){} }).catch(()=>{});
     }
     // 自选股均线/MACD 富集（best-effort，5分钟缓存；失败则信号降级为量价-only）
     try{ await Promise.allSettled((STATE.watchlist||[]).map(enrichWatchTech)); }catch(e){}
