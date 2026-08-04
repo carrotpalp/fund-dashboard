@@ -2184,19 +2184,24 @@ function computeDivergence(industries){
   const mean = a => a.reduce((s,x)=>s+x,0)/a.length;
   const avgC = mean(changes), stdC = Math.sqrt(mean(changes.map(c=>(c-avgC)**2))) || 1;
   const avgF = mean(flows), stdF = Math.sqrt(mean(flows.map(f=>(f-avgF)**2))) || 1;
+  // 尺度校准(第四点优化)：资金流离散度(std 常达数十亿)远大于涨跌幅离散度(std 不足1%)，各自 z-score 差分会被资金维放大→普涨/普跌日批量假阳性。
+  // 改用百分位排名(0~1)替代 z-score，使两维落在同一尺度再相减，消除量纲失衡。
+  const rankPct = (v, arr) => { const n = arr.length; if(!n) return 0.5; const less = arr.filter(x=>x<v).length, eq = arr.filter(x=>x===v).length; return (less + eq/2)/n; };
+  const chgRank = changes.map(c=>rankPct(c, changes));
+  const flowRank = flows.map(f=>rankPct(f, flows));
   const divs = industries.map((ind,i)=>{
     const chg = changes[i], flow = flows[i];
-    const zC = (chg-avgC)/stdC, zF = (flow-avgF)/stdF;
-    const score = zF - zC;            // >0 资金相对价格更强；<0 资金相对价格更弱
+    const zC = chgRank[i], zF = flowRank[i];   // 百分位排名(0~1)，已消除尺度失衡
+    const score = zF - zC;            // ∈[-1,1]；>0 资金相对价格更强；<0 资金相对价格更弱
     const inflow = flow > 0;
     let type='hold', action='hold', actLabel='持有', desc='';
-    if(inflow && score > 0.8){          // 资金明显流入且强于涨幅 → 看涨背离
+    if(inflow && score > 0.6){          // 资金明显流入且强于涨幅 → 看涨背离（阈值随百分位尺度适配，原0.8在百分位下过严）
       type='inflow'; action='buy'; actLabel='买入';
       desc = `大资金在悄悄进货：主力净流入 ${flow.toFixed(1)}亿，但价格只${chg>=0?'涨了':'跌了'} ${fmt2(Math.abs(chg))}%，涨幅明显落后于资金，后面有补涨空间，可逢低买入。`;
     }else if(inflow && score > 0.3){
       type='inflow'; action='buy'; actLabel='关注';
       desc = `有资金在持续买入：主力净流入 ${flow.toFixed(1)}亿，价格${chg>=0?'涨了':'跌了'} ${fmt2(Math.abs(chg))}%，资金比价格更积极，值得关注。`;
-    }else if(!inflow && score < -0.8){   // 资金流出但价格跌幅相对较浅 → 看跌背离
+    }else if(!inflow && score < -0.6){   // 资金流出但价格跌幅相对较浅 → 看跌背离（阈值随百分位尺度适配）
       type='outflow'; action='sell'; actLabel='减仓';
       desc = `主力在偷偷出货：净流出 ${Math.abs(flow).toFixed(1)}亿，但价格还没跌透（${chg>=0?'甚至还在涨':'只跌了'+fmt2(Math.abs(chg))+'%'}），后面容易补跌，建议减仓。`;
     }else if(!inflow && score < -0.3){
