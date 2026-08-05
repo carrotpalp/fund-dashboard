@@ -3080,23 +3080,40 @@ function renderSectorTop(){
   };
   el.innerHTML = mk(inflow, 'up-c', '主力流入') + mk(outflow, 'down-c', '主力流出');
 }
+// 日内成交呈 U 型分布：开盘后30分与收盘前30分最密，午后清淡。
+// 用「已交易分钟 → 占全天比例」的经验曲线反推全天，而非 naive 的「已用时长/全天时长」线性外推
+// （后者因早盘最密会严重高估，曾出现 30%时段 → 4.57万亿 的离谱值）。
+const DAY_SHARE = [ // [已交易分钟(午休不计入), 累计占全天比例]
+  [0,   0.00],[30, 0.18],[60, 0.35],[90, 0.50],[120, 0.57], // 上午 9:30-11:30
+  [150, 0.67],[180, 0.76],[210, 0.86],[240, 1.00]           // 下午 13:00-15:00（午休跳过）
+];
+function dayCumShare(elapsed){
+  if(elapsed<=0) return 0;
+  for(let i=1;i<DAY_SHARE.length;i++){
+    if(elapsed<=DAY_SHARE[i][0]){
+      const t0=DAY_SHARE[i-1][0], s0=DAY_SHARE[i-1][1], t1=DAY_SHARE[i][0], s1=DAY_SHARE[i][1];
+      const r=(elapsed-t0)/Math.max(1,t1-t0);
+      return s0+(s1-s0)*r;
+    }
+  }
+  return 1;
+}
 function predictFullDayAmt(){
-  // 基于当前沪深成交额(STATE.totalAmt, 亿元)按交易时段进度线性推算全天
   const now = new Date();
   const mins = now.getHours()*60 + now.getMinutes();
-  const open=570, amEnd=690, pmStart=780, close=900, total=240;
+  const open=570, amEnd=690, pmStart=780, close=900;
   let elapsed;
   if(mins<open) return null;
   else if(mins<=amEnd) elapsed=mins-open;
-  else if(mins<pmStart) elapsed=amEnd-open;            // 午休：只计上午
+  else if(mins<pmStart) elapsed=amEnd-open;            // 午休：上午全量已定，停留
   else if(mins<=close) elapsed=(amEnd-open)+(mins-pmStart);
-  else elapsed=total;
-  if(elapsed<=0) return null;
-  const frac=elapsed/total;
-  if(frac<0.02) return null;                            // 刚开盘，推算无意义
+  else return null;
+  if(elapsed<20) return null;                           // 开盘前20分钟样本太少，推算无意义
+  const share = dayCumShare(elapsed);
+  if(share<0.02) return null;
   const cur = STATE.totalAmt||0;
   if(!cur || isNaN(cur)) return null;
-  return { pred: cur/frac, frac };
+  return { pred: cur/share, share };
 }
 function amtCardHTML(){
   const amt = STATE.totalAmt;
@@ -3105,7 +3122,7 @@ function amtCardHTML(){
   const pr = predictFullDayAmt();
   if(pr){
     const pTxt = pr.pred>=10000 ? (pr.pred/10000).toFixed(2)+'万亿' : pr.pred.toFixed(0)+'亿';
-    predHtml = `<div style="font-size:11px;color:var(--text-2);margin-top:5px">预计全天 <b style="color:var(--text-1);font-family:var(--mono)">${pTxt}</b> · 线性推算(${(pr.frac*100).toFixed(0)}%时段)</div>`;
+    predHtml = `<div style="font-size:11px;color:var(--text-2);margin-top:5px">预计全天 <b style="color:var(--text-1);font-family:var(--mono)">${pTxt}</b> · 估算(日内分布修匀·累计${(pr.share*100).toFixed(0)}%)</div>`;
   }
   return `<div class="bm-card"><div class="bm-h"><span>全市场成交额</span></div>
     <div class="bm-median-val" style="color:var(--text-1);font-size:24px">${amtTxt}</div>
