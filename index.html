@@ -951,6 +951,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
           <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">多日累计主力净流入 + 净流入天数比 + 价格走出；无共识则空态</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">仅主线内部 · 今日落后主线均涨幅的补涨候选（非主线不展示）</span></h4><div class="ss-list" id="ssLow"></div></div>
+          <div class="ss-card ss-catchup"><h4>📊 主线补涨观察 <span class="ss-tag">主线内相对低位个股 · 技术位 2026-08-06 快照 · 涨跌幅实时</span></h4><div class="ss-list" id="ssCatchup"></div></div>
         </div>
         <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 板块市值前4大成分股(新浪日K)等权合成历史序列，算 MA5/10/20 + MACD，给出顺势/转强/回避建议</b>。<b style="color:#e8a33d">【重要】本榜 = 基于 sector_flow_history 的多日「主线」识别（累计主力净流入归一 50% + 净流入天数比 20% + 历史涨幅/今日实时确认 30%）；无板块同时满足门槛则显示空态、不强行展示。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20、均线多头排列、MACD向上)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；每个板块同时给出"顺势关注/短线过热·等回踩/转强观察/震荡持有/趋势下·回避"建议（数据源浏览器可达，不再依赖被墙的 push2his）。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
@@ -6049,9 +6050,57 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     const rb=document.getElementById('ssRefreshBtn');
     if(rb) rb.onclick=()=>renderShunshiBoard();
   }
+  // ---------- 主线补涨观察（个股）：主线板块内相对低位龙头，技术位 2026-08-06 收盘快照 ----------
+  const CATCHUP_STOCKS = [
+    {code:'300502', name:'新易盛',   sector:'通信设备', vsMa20:-11.2, offHi:-25.8},
+    {code:'300308', name:'中际旭创', sector:'通信设备', vsMa20:-6.8,  offHi:-19.3},
+    {code:'688981', name:'中芯国际', sector:'电子',     vsMa20:-12.2, offHi:-24.1},
+    {code:'002384', name:'东山精密', sector:'元件',     vsMa20:-11.0, offHi:-30.2},
+    {code:'688256', name:'寒武纪',   sector:'电子',     vsMa20:-4.4,  offHi:-17.2},
+    {code:'300394', name:'天孚通信', sector:'通信设备', vsMa20:+3.9,  offHi:-17.6},
+    {code:'601869', name:'长飞光纤', sector:'通信设备', vsMa20:-4.4,  offHi:-22.8},
+    {code:'002379', name:'宏桥控股', sector:'有色金属', vsMa20:+0.6,  offHi:-10.2},
+    {code:'600549', name:'厦门钨业', sector:'小金属',   vsMa20:+10.6, offHi:-9.3},
+    {code:'000657', name:'中钨高新', sector:'小金属',   vsMa20:+5.2,  offHi:-16.4},
+    {code:'603019', name:'中科曙光', sector:'计算机',   vsMa20:-6.1,  offHi:-18.3},
+    {code:'300567', name:'精测电子', sector:'设备',     vsMa20:-7.4,  offHi:-30.0},
+    {code:'301666', name:'大普微-UW',sector:'计算机',   vsMa20:-7.1,  offHi:-21.9},
+  ];
+  async function renderSsCatchup(){
+    const el = document.getElementById('ssCatchup');
+    if(!el) return;
+    const pre = CATCHUP_STOCKS.map(s => (s.code[0]==='6' ? 'sh' : 'sz') + s.code);
+    const url = 'https://qt.gtimg.cn/q=' + pre.join(',') + '&_=' + Date.now();
+    const q = {};
+    await new Promise(res=>{
+      const sc = document.createElement('script');
+      sc.onload = ()=>{
+        pre.forEach((k,i)=>{
+          const raw = window['v_'+k];
+          if(raw){ const v = raw.split('~'); const chg = parseFloat(v[32]); q[CATCHUP_STOCKS[i].code] = isNaN(chg)?0:chg; }
+        });
+        sc.remove(); res();
+      };
+      sc.onerror = ()=>{ sc.remove(); res(); };
+      sc.src = url; document.body.appendChild(sc);
+    });
+    el.innerHTML = CATCHUP_STOCKS.map(s=>{
+      const chg = q[s.code]!=null ? q[s.code] : 0;
+      const c = chg>=0 ? 'up-c' : 'down-c';
+      const lag = s.vsMa20 < 0 ? ('对MA20 '+s.vsMa20.toFixed(1)+'%') : '已站上MA20';
+      return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
+        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(chg)+'</span></span>'+
+        '<span class="ss-tagline"><span class="ss-chip">'+s.sector+'</span>'+
+        '<span class="ss-chip">'+lag+'</span>'+
+        '<span class="ss-chip weak">距高'+s.offHi.toFixed(1)+'%</span></span></div>';
+    }).join('') +
+    '<div class="ss-row ss-note-sm">技术位为 2026-08-06 收盘快照（对MA20 / 距20日高点）；涨跌幅实时刷新。仅主线内相对低位候选，非个股推荐</div>';
+  }
+
   function ssGo(){
     bindSsEvents(); renderShunshiBoard();
     setInterval(renderShunshiBoard, 60000); // 60s 刷新；指数MA20/自选tech 各自5分钟缓存
+    renderSsCatchup(); setInterval(renderSsCatchup, 5000); // 主线补涨观察：实时涨跌幅，5s 刷新
   }
   if(document.readyState!=='loading') setTimeout(ssGo, 600);
   else document.addEventListener('DOMContentLoaded', ()=>setTimeout(ssGo, 600));
