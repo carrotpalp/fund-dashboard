@@ -304,6 +304,20 @@ html.light .theme-btn::after{content:'☀️';left:16px}
 .wl-stat-sep .seg-a::before{background:var(--up)}
 .wl-stat-sep .seg-h::before{background:var(--blue)}
 .wl-stat-sep .seg-f::before{background:var(--gold)}
+/* 自选股近30交易日每日收益 · 触发点 + 浮层 */
+.wl-pnl-trigger{margin-left:8px;font-size:10px;font-weight:600;color:var(--blue);cursor:pointer;border:1px solid rgb(from var(--blue) r g b /.4);border-radius:4px;padding:1px 6px;background:rgb(from var(--blue) r g b /.12);white-space:nowrap;user-select:none}
+.wl-pnl-trigger:hover{background:rgb(from var(--blue) r g b /.22)}
+.wl-pnl-pop{position:fixed;z-index:9999;min-width:300px;max-width:92vw;max-height:64vh;overflow:auto;background:var(--bg-panel);border:1px solid var(--border-light);border-radius:8px;box-shadow:0 12px 40px rgb(from var(--shadow) r g b /.55);padding:10px 12px;font-size:11px;color:var(--text-1)}
+.wl-pnl-pop h5{margin:0 0 8px;font-size:12px;font-weight:700;color:var(--text-1);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.wl-pnl-pop .wl-pnl-sub{font-size:10px;color:var(--text-3);font-weight:400}
+.wl-pnl-tbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.wl-pnl-tbl th{color:var(--text-3);font-weight:500;text-align:right;padding:4px 7px;border-bottom:1px solid var(--border);font-size:10px;white-space:nowrap}
+.wl-pnl-tbl th:first-child{text-align:left}
+.wl-pnl-tbl td{padding:3px 7px;text-align:right;white-space:nowrap}
+.wl-pnl-tbl td:first-child{text-align:left;color:var(--text-2)}
+.wl-pnl-tbl tr:first-child td{font-weight:700}
+.wl-pnl-tbl tr:hover td{background:rgb(from var(--bg-hover) r g b /.25)}
+.wl-pnl-empty{padding:18px;text-align:center;color:var(--text-3);line-height:1.7}
 .ocr-modal{position:fixed;inset:0;background:rgb(from var(--shadow) r g b /.6);display:none;align-items:center;justify-content:center;z-index:200}
 .ocr-modal.active{display:flex}
 .ocr-box{width:min(520px,92vw);max-height:82vh;overflow:auto;background:var(--bg-panel);border:1px solid var(--border-light);border-radius:8px;padding:18px}
@@ -854,7 +868,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
   <!-- Row 3.5: Watchlist -->
   <div class="gr r2">
     <div class="panel wl-panel">
-      <div class="ph"><span class="pt">自选股 / 基金 <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">本地持久化(localStorage)</span></span><span class="ps"><span id="wlSub"></span><span class="wl-io-group"><button class="wl-io-btn" id="wlExportBtn" title="导出自选股为 JSON 文件">⬇ 导出</button><button class="wl-io-btn" id="wlImportBtn" title="从 JSON 文件导入自选股">⬆ 导入</button></span><input type="file" id="wlImportInput" accept=".json,application/json" style="display:none"></span></div>
+      <div class="ph"><span class="pt">自选股 / 基金 <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">本地持久化(localStorage)</span><span class="wl-pnl-trigger" id="wlPnlTrigger" title="查看近30个交易日每日收益（鼠标移上去）">📈 30日收益</span></span><span class="ps"><span id="wlSub"></span><span class="wl-io-group"><button class="wl-io-btn" id="wlExportBtn" title="导出自选股为 JSON 文件">⬇ 导出</button><button class="wl-io-btn" id="wlImportBtn" title="从 JSON 文件导入自选股">⬆ 导入</button></span><input type="file" id="wlImportInput" accept=".json,application/json" style="display:none"></span></div>
       <div class="pb">
         <div class="wl-add">
           <div class="wl-search">
@@ -874,6 +888,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
         </div>
         <div class="wl-footer" id="wlFooter"></div>
       </div>
+      <div id="wlPnlPop" class="wl-pnl-pop" style="display:none"></div>
     </div>
   </div>
 
@@ -3875,6 +3890,74 @@ function updateWatchlistLive(){
     if(tplCell){ const t=cumPl(w); if(t===null){ tplCell.textContent='—'; tplCell.className='wl-num'; } else { tplCell.textContent=fmtMoney(t); tplCell.className='wl-num '+(t>0?'up-c':(t<0?'down-c':'')); } }
   }
   renderWatchlistFooter();
+  // 近30交易日每日收益：节流记录（每分钟至多一次；当天条目实时更新，收盘后定格为当日值）
+  const _t = Date.now();
+  if(_t - __wlPnlLastRec > 60000){ if(recordWatchlistDailyPnl()) __wlPnlLastRec = _t; }
+}
+/* ============ 自选股近30交易日每日收益 · 本地缓存(localStorage) + 浮层 ============ */
+const WL_PNL_KEY = 'ashare_wl_pnl_history_v1';
+let __wlPnlLastRec = 0;
+function loadWlPnlHistory(){
+  try{ const o = JSON.parse(localStorage.getItem(WL_PNL_KEY)||'null'); return Array.isArray(o)?o:[]; }catch(e){ return []; }
+}
+function saveWlPnlHistory(arr){ try{ localStorage.setItem(WL_PNL_KEY, JSON.stringify(arr)); }catch(e){} }
+function recordWatchlistDailyPnl(){
+  const wl = STATE.watchlist||[];
+  if(!wl.length) return false;
+  const dow = new Date().getDay();
+  if(dow===0 || dow===6) return false;        // 仅交易日（跳过周末；节假日若有交易亦会记录）
+  let ashare=0, hk=0, fund=0, total=0, any=false;
+  for(const w of wl){
+    const pl = plOf(w);                         // 当日收益(元)=持有数量×当日涨跌额（复用现成逻辑，股票/ETF/场外基金通用）
+    if(pl===null || !isFinite(pl)) continue;
+    const mk = marketOf(w);
+    if(mk==='ashare') ashare+=pl; else if(mk==='hk') hk+=pl; else if(mk==='fund') fund+=pl;
+    total+=pl; any=true;
+  }
+  if(!any) return false;                        // 没有任何「持有数量」的持仓则不记录
+  const d = shanghaiToday();
+  const r2 = v => Math.round(v*100)/100;
+  const entry = { date:d, ashare:r2(ashare), hk:r2(hk), fund:r2(fund), total:r2(total) };
+  const hist = loadWlPnlHistory();
+  const idx = hist.findIndex(h=>h.date===d);
+  if(idx>=0) hist[idx]=entry; else hist.unshift(entry);     // 当天只更新不重复
+  hist.sort((a,b)=> (a.date<b.date?1:(a.date>b.date?-1:0)));   // 交易日降序
+  while(hist.length>30) hist.pop();                         // 仅保留最近30个交易日
+  saveWlPnlHistory(hist);
+  return true;
+}
+function buildWlPnlPopHTML(){
+  const hist = loadWlPnlHistory();
+  if(!hist.length){
+    return '<h5>近30交易日每日收益 <span class="wl-pnl-sub">按「持有数量×当日涨跌额」累计</span></h5>'+
+           '<div class="wl-pnl-empty">暂无记录。<br>每个交易日收盘后（当日页面有刷新）会自动累积；<br>需先在「持有数量」列填入各持仓数量。</div>';
+  }
+  const cell = v => `<td class="${v>0?'up-c':(v<0?'down-c':'')}">${fmtMoneyInline(v)}</td>`;
+  const rows = hist.map(h=>{
+    const today = h.date===shanghaiToday();
+    return `<tr${today?' style="background:rgb(from var(--bg-hover) r g b /.2)"':''}><td>${h.date}${today?' ·今':''}</td>${cell(h.ashare)}${cell(h.hk)}${cell(h.fund)}${cell(h.total)}</tr>`;
+  }).join('');
+  return '<h5>近30交易日每日收益 <span class="wl-pnl-sub">元 · 按「持有数量×当日涨跌额」</span></h5>'+
+    '<table class="wl-pnl-tbl"><thead><tr><th>交易日</th><th>A股</th><th>港股</th><th>场外基金</th><th>当日总收益</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function initWlPnlPop(){
+  const trigger = document.getElementById('wlPnlTrigger');
+  const pop = document.getElementById('wlPnlPop');
+  if(!trigger || !pop) return;
+  let hideTimer=null;
+  const show = ()=>{ clearTimeout(hideTimer); pop.innerHTML = buildWlPnlPopHTML(); pop.style.display='block';
+    const r = trigger.getBoundingClientRect();
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = r.left, top = r.bottom+6;
+    if(left+pw > window.innerWidth-8) left = Math.max(8, window.innerWidth-pw-8);
+    if(top+ph > window.innerHeight-8) top = Math.max(8, r.top-ph-6);   // 下方空间不足则翻到上方
+    pop.style.left = left+'px'; pop.style.top = top+'px';
+  };
+  const hide = ()=>{ hideTimer=setTimeout(()=>{ pop.style.display='none'; }, 220); };
+  trigger.addEventListener('mouseenter', show);
+  trigger.addEventListener('mouseleave', hide);
+  pop.addEventListener('mouseenter', ()=>clearTimeout(hideTimer));
+  pop.addEventListener('mouseleave', hide);
 }
 function renderWatchlist(){
   const wl=STATE.watchlist||[];
@@ -5584,6 +5667,7 @@ try{
 loadWL();
 renderSignalSectors();
 renderWatchlist();      // 立即渲染已保存的自选股（避免在1s刷新前看起来"消失"）
+  initWlPnlPop();        // 绑定「近30日收益」悬停浮层
   refreshWatchlist();     // 立即拉取行情
   fastCycle();
   slowCycle(true);
