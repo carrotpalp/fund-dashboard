@@ -3798,7 +3798,14 @@ function mktValue(w){                        // 持仓市值(元) = 持有数量
   return w.units * w.q.price;
 }
 function plOf(w){                            // 当日收益(元) = 持有数量 × 当日涨跌额(基金=估算净值−昨净值)
-  if(!dailyVisible(w) || !w.q || !(w.units>0)) return null;
+  if(!w.q || !(w.units>0)) return null;
+  // 场外基金：直接取当前显示值（盘中=估算、官方披露后=官方净值涨跌额），与列表展示完全一致；
+  // 官方一更新 w.q.change_amt 自动翻成官方值，无需额外处理（用户要求“取下面预估、正式更新一起更新，保持一致”）。
+  if(w.classify==='OTCFUND'){
+    const c = w.q.change_amt;
+    return (typeof c==='number' && isFinite(c)) ? w.units*c : null;
+  }
+  if(!dailyVisible(w)) return null;
   return w.units * w.q.change_amt;
 }
 function costEntered(w){ return !!(w && w.cost>0 && w.units>0); }      // 已填成本价且持有数量>0
@@ -4987,6 +4994,7 @@ async function estimateFundGz(code){
         const prevTd = (()=>{ const x=new Date(); do{ x.setDate(x.getDate()-1); }while(x.getDay()===0||x.getDay()===6); return x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate()); })();
         const nameQDII = /QDII|纳斯达克|标普|道琼斯|环球|海外|美国|全球|亚太|欧洲|日本|德国|香港|恒生|中概|境外|美元/.test(name);
         const isQDII = nameQDII || (navDate && navDate < prevTd);
+        const isGold = /黄金|贵金属/.test(name);   // 黄金基金：底层为黄金(AU9999)，非A股成分股，需走参考黄金ETF估算分支
         const chgPct = (prevNav>0) ? +(((nav-prevNav)/prevNav)*100).toFixed(2) : (+(last.equityReturn||0)||0);
         const chgAmt = +((nav-prevNav)).toFixed(4);
         if(isQDII){
@@ -5016,6 +5024,22 @@ async function estimateFundGz(code){
             amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
             est:false, isOfficial:true, estMethod:'pzd-official', isQDII:false,
             isToday:(navDate===tday), navDate, gztime:navDate };
+        }
+        // 黄金基金特殊分支：底层为黄金(AU9999)，持仓非 A股，通用估算取不到成分股实时价；
+        // 改用「参考黄金ETF(华安黄金ETF 518880)」实时涨跌幅估算——所有黄金基金均跟踪同一标的，跟踪误差<0.1%，估算合理。
+        // 取不到参考ETF报价则继续走下方官方净值降级（保持原“估算暂不可用”行为，无回归）。
+        if(isGold){
+          try{
+            const gq = await estQuote('1.518880');
+            if(gq && gq.change_pct!=null && !isNaN(gq.change_pct)){
+              const gChgPct = +gq.change_pct;
+              const estNav = +(nav*(1+gChgPct/100)).toFixed(4);
+              return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), change_pct:gChgPct,
+                amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
+                est:true, isOfficial:false, estMethod:'gold-etf-ref', isGold:true, isQDII:false,
+                isToday:true, navDate, gztime:tsToDate(Date.now())+' '+new Date().toLocaleTimeString('zh-CN',{hour12:false}) };
+            }
+          }catch(e){ console.warn('gold est', code, e); }
         }
         // 盘中且官方未披露 → 自建估算
         // 优先用 fundf10 前十大真实权重（iframe 内 fund.eastmoney.com 作 Referer，浏览器可达），
