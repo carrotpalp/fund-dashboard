@@ -948,12 +948,11 @@ html.light .theme-btn::after{content:'☀️';left:16px}
       <div class="pb">
         <div class="ss-grid">
           <div class="ss-regime" id="ssRegime"><div class="ss-regime-body"><span class="ss-light loading">加载中…</span></div></div>
-          <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">多日累计主力净流入 + 净流入天数比 + 价格走出；无共识则空态</span></h4><div class="ss-list" id="ssMainline"></div></div>
+          <div class="ss-card ss-mainline"><h4>🔥 板块强度榜 <span class="ss-tag">东财行业/概念板块·按今日涨幅+资金+广度综合强度排序</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">MA(新浪)+实时量价(腾讯)</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
-          <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">仅主线内部 · 今日落后主线均涨幅的补涨候选（非主线不展示）</span></h4><div class="ss-list" id="ssLow"></div></div>
-          <div class="ss-card ss-catchup"><h4>📊 主线补涨观察 <span class="ss-tag">主线内相对低位个股 · 技术位 2026-08-06 快照 · 涨跌幅实时</span></h4><div class="ss-list" id="ssCatchup"></div></div>
+          <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">从热度前15里挑涨最少·成交额≥50亿</span></h4><div class="ss-list" id="ssLow"></div></div>
         </div>
-        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 板块市值前4大成分股(新浪日K)等权合成历史序列，算 MA5/10/20 + MACD，给出顺势/转强/回避建议</b>。<b style="color:#e8a33d">【重要】本榜 = 基于 sector_flow_history 的多日「主线」识别（累计主力净流入归一 50% + 净流入天数比 20% + 历史涨幅/今日实时确认 30%）；无板块同时满足门槛则显示空态、不强行展示。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20、均线多头排列、MACD向上)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；每个板块同时给出"顺势关注/短线过热·等回踩/转强观察/震荡持有/趋势下·回避"建议（数据源浏览器可达，不再依赖被墙的 push2his）。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
+        <div class="ss-note">数据地基：大盘定调 = 上证/创业板日K(新浪)算 MA20 + 市场广度(东财)；板块强度榜/低位补涨 = 东财行业·概念板块当日行情（已剔除指数/风格/大概念桶，与同花顺/雪球热力图的申万二级分类非同一口径，涨幅数值不可直接对比）；<b style="color:#e8a33d">趋势过滤 = 板块市值前4大成分股(新浪日K)等权合成历史序列，算 MA5/10/20 + MACD，给出顺势/转强/回避建议</b>。<b style="color:#e8a33d">【重要】本榜 = 东财"板块相对强度"排序（涨幅55% + 成交额25% + 上涨家数占比20%）。「涨停N」此前是字段误读（f104实为上涨家数，已改为"涨N/跌M"）。今日若板块普跌，绿盘入榜=相对抗跌+资金活跃+内部上涨家数多；再叠加"趋势过滤"(板块站上 MA20、均线多头排列、MACD向上)后才标「主流板块」，以此过滤一日游题材、逼近雷立刚"主流板块=已走出来+持续活跃"的判定；每个板块同时给出"顺势关注/短线过热·等回踩/转强观察/震荡持有/趋势下·回避"建议（数据源浏览器可达，不再依赖被墙的 push2his）。</b>自选信号 = 自选股 MA(新浪)+实时量比涨跌(腾讯)。本看板为交易纪律辅助工具，所有信号仅供参考，不构成投资建议。</div>
       </div>
     </div>
   </div>
@@ -3934,47 +3933,26 @@ function recordWatchlistDailyPnl(){
   saveWlPnlHistory(hist);
   return true;
 }
-function computeTodayPnlLive(){
-  // 实时计算今日收益拆分（元），与列表/页脚一致；用于浮层「今日」行随行情刷新（OTC 经 plOf 自然正确）
-  const wl = STATE.watchlist||[];
-  let ashare=0, hk=0, fund=0, total=0, any=false;
-  for(const w of wl){
-    const pl = plOf(w);
-    if(pl===null || !isFinite(pl)) continue;
-    const mk = marketOf(w);
-    if(mk==='ashare') ashare+=pl; else if(mk==='hk') hk+=pl; else if(mk==='fund') fund+=pl;
-    total+=pl; any=true;
-  }
-  return any ? {ashare, hk, fund, total} : null;
-}
 function buildWlPnlPopHTML(){
   const hist = loadWlPnlHistory();
-  const today = shanghaiToday();
-  const live = computeTodayPnlLive();
-  if(!hist.length && !live){
+  if(!hist.length){
     return '<h5>近30交易日每日收益 <span class="wl-pnl-sub">按「持有数量×当日涨跌额」累计</span></h5>'+
-           '<div class="wl-pnl-empty">暂无记录。<br>每个交易日页面有刷新、且已填「持有数量」时自动累积；<br>「今日」行随行情实时刷新。</div>';
+           '<div class="wl-pnl-empty">暂无记录。<br>每个交易日收盘后（当日页面有刷新）会自动累积；<br>需先在「持有数量」列填入各持仓数量。</div>';
   }
   const cell = v => `<td class="${v>0?'up-c':(v<0?'down-c':'')}">${fmtMoneyInline(v)}</td>`;
-  let rowsData;
-  if(live){
-    const others = hist.filter(h=>h.date!==today);   // 历史去掉今日，用实时今日覆盖
-    rowsData = [{date:today, ashare:live.ashare, hk:live.hk, fund:live.fund, total:live.total, live:true}].concat(others);
-  } else { rowsData = hist; }
-  const rows = rowsData.map(h=>{
-    const isToday = h.date===today;
-    const tag = (h.live?' ·实时':(isToday?' ·今':''));
-    return `<tr${isToday?' style="background:rgba(232,163,61,.14)"':''}><td>${h.date}${tag}</td>${cell(h.ashare)}${cell(h.hk)}${cell(h.fund)}${cell(h.total)}</tr>`;
+  const rows = hist.map(h=>{
+    const today = h.date===shanghaiToday();
+    return `<tr${today?' style="background:rgb(from var(--bg-hover) r g b /.2)"':''}><td>${h.date}${today?' ·今':''}</td>${cell(h.ashare)}${cell(h.hk)}${cell(h.fund)}${cell(h.total)}</tr>`;
   }).join('');
-  return '<h5>近30交易日每日收益 <span class="wl-pnl-sub">元 · 今日随行情实时刷新</span></h5>'+
+  return '<h5>近30交易日每日收益 <span class="wl-pnl-sub">元 · 按「持有数量×当日涨跌额」</span></h5>'+
     '<table class="wl-pnl-tbl"><thead><tr><th>交易日</th><th>A股</th><th>港股</th><th>场外基金</th><th>当日总收益</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
 function initWlPnlPop(){
   const trigger = document.getElementById('wlPnlTrigger');
   const pop = document.getElementById('wlPnlPop');
   if(!trigger || !pop) return;
-  let hideTimer=null, refreshTimer=null;
-  const position = ()=>{
+  let hideTimer=null;
+  const show = ()=>{ clearTimeout(hideTimer); pop.innerHTML = buildWlPnlPopHTML(); pop.style.display='block';
     const r = trigger.getBoundingClientRect();
     const pw = pop.offsetWidth, ph = pop.offsetHeight;
     let left = r.left, top = r.bottom+6;
@@ -3982,9 +3960,7 @@ function initWlPnlPop(){
     if(top+ph > window.innerHeight-8) top = Math.max(8, r.top-ph-6);   // 下方空间不足则翻到上方
     pop.style.left = left+'px'; pop.style.top = top+'px';
   };
-  const render = ()=>{ pop.innerHTML = buildWlPnlPopHTML(); position(); };
-  const show = ()=>{ clearTimeout(hideTimer); pop.style.display='block'; render(); if(refreshTimer) clearInterval(refreshTimer); refreshTimer=setInterval(render, 3000); };
-  const hide = ()=>{ hideTimer=setTimeout(()=>{ pop.style.display='none'; if(refreshTimer){ clearInterval(refreshTimer); refreshTimer=null; } }, 220); };
+  const hide = ()=>{ hideTimer=setTimeout(()=>{ pop.style.display='none'; }, 220); };
   trigger.addEventListener('mouseenter', show);
   trigger.addEventListener('mouseleave', hide);
   pop.addEventListener('mouseenter', ()=>clearTimeout(hideTimer));
@@ -5796,77 +5772,34 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     // 排除指数/风格/大概念桶（非具体可交易主线），避免"中证500/互联网金融/绿色电力"以成分股数量霸榜
     const NOISE = /罗素|富时|标普|普尔|MSCI|中证|上证\d|深证|沪深|HS300|科创50|北证|证金|机构重仓|融资融券|股通|百元股|基金重仓|社保|养老金|QFII|破净|昨日涨停|昨日跌停|昨曾涨停|高送转|ST板块|昨日触板|含H股|AH股|同花顺|Wind|价值|大盘股|中盘|小盘|低价股|高价股|沪深300|上证50|上证180|上证380|中证500|中证1000|深证成指|创业板指|行业龙头|权重股|茅指数|周期股|参股银行|参股券商|核心资产|蓝筹股|宁组合|风格|中特估|中字头|央视50|趋势股|红利股|红利破净|金融地产|医药医疗|互联网金融|绿色电力|稀缺资源|PPP模式|REITs|化债|深成|上证|深证|50|180|380|500|1000|龙头|成长/;
     const MIN_AMT = 10; // 板块成交额门槛(亿)：仅剔除纯微盘噪音；旧值100亿会把今天真涨的小成交额主线(乳品/教育/医院等)整批过滤掉
-    const rtMap = {};
-    const _addRt = (r, cat)=>{ parse(r).filter(s=>s.f14 && !NOISE.test(s.f14) && (s.f6||0)/1e8 >= MIN_AMT)
-      .forEach(s=>{ rtMap[s.f12] = {name:s.f14, chg:s.f3||0, amt:(s.f6||0)/1e8, up:s.f104||0, down:s.f105||0, cat}; }); };
-    _addRt(ind0,'行业'); _addRt(ind1,'行业'); _addRt(con0,'概念'); _addRt(con1,'概念');
-    // 2) 多日持续性：从 sector_flow_history.json 计算各板块「累计主力净流入 / 净流入天数比 / 可用累计涨幅」
-    //    这是识别「主线」的核心——资金持续涌入 + 价格走出，过滤一日游题材。
-    const hist = STATE.sectorFlowHist;
-    const dayKeys = (hist && hist.days) ? Object.keys(hist.days).sort() : [];
-    const baseCodes = [];
-    if(dayKeys.length){
-      const lastDay = hist.days[dayKeys[dayKeys.length-1]];
-      for(const c in lastDay){ const nm = lastDay[c] && lastDay[c].name; if(nm && !NOISE.test(nm)) baseCodes.push(c); }
-    }
-    const codes = new Set(baseCodes);
-    Object.keys(rtMap).forEach(c=>codes.add(c));
-    const series = {};
-    for(const code of codes){
-      const s = {name:'', net:[], chg:[]};
-      if(dayKeys.length){ const e = hist.days[dayKeys[dayKeys.length-1]][code]; if(e && e.name) s.name = e.name; }
-      if(!s.name && rtMap[code]) s.name = rtMap[code].name;
-      if(!s.name) s.name = code;
-      for(const dk of dayKeys){ const e = hist.days[dk][code]; if(e){ if(typeof e.n==='number') s.net.push(e.n); if(typeof e.c==='number') s.chg.push(e.c); } }
-      series[code] = s;
-    }
-    // 3) 主线分：资金持续性为主(0.5) + 净流入天数比(0.2) + 价格确认(0.3: 有历史涨幅用累计涨幅归一, 否则用今日实时)
-    const arr = Object.keys(series).map(code=>{
-      const s = series[code];
-      const cumNet = s.net.reduce((a,b)=>a+b,0);
-      const netUpRatio = s.net.length ? s.net.filter(v=>v>0).length/s.net.length : 0;
-      const cumChg = s.chg.reduce((a,b)=>a+b,0);
-      const hasChg = s.chg.length>0;
-      const rt = rtMap[code] || {chg:0, amt:0, up:0, down:0, cat:''};
-      return {code, name:s.name, cat: rt.cat||'', cumNet, netUpRatio, cumChg, hasChg, rtChg:rt.chg, rtAmt:rt.amt, rtUp:rt.up, rtDown:rt.down};
-    });
-    const norm=(key)=>{ const vs=arr.map(a=>a[key]); const mx=Math.max.apply(null,vs), mn=Math.min.apply(null,vs); return v=> mx===mn?0.5:(v-mn)/(mx-mn); };
-    const zNet=norm('cumNet'), zChg=norm('cumChg');
-    arr.forEach(a=>{
-      const priceConfirm = a.hasChg ? zChg(a.cumChg) : (a.rtChg>0?0.6:0.3);
-      a.score = 0.5*zNet(a.cumNet) + 0.2*a.netUpRatio + 0.3*priceConfirm;
-      // 主线门槛：累计主力净流入为正 且 净流入天数比≥50% 且 (有涨幅记录则累计涨幅>0 或 今日实时上涨)
-      a.isMain = a.cumNet>0 && a.netUpRatio>=0.5 && (a.hasChg ? a.cumChg>0 : a.rtChg>=0);
-    });
-    const mainAll = arr.filter(a=>a.isMain).sort((a,b)=>b.score-a.score);
-    const main = mainAll.slice(0,10);
-    // 低位补涨：仅在【主线】内部寻找相对低位、尚未充分表现的补涨候选
-    // 主线内今日涨幅跑输主线整体、但多日资金仍持续净流入的板块 = 补涨空间最大；非主线一律不展示
-    const mainAvgChg = mainAll.length ? mainAll.reduce((s,a)=>s+(a.rtChg||0),0)/mainAll.length : 0;
-    let low = [];
-    if(mainAvgChg > 0){
-      low = mainAll
-        .filter(a=> a.cumNet>0 && a.netUpRatio>=0.5 && (a.rtChg||0) < mainAvgChg)  // 主线内、今日跑输主线均值
-        .map(a=>{ a.gap = mainAvgChg - (a.rtChg||0); return a; })
-        .sort((a,b)=> b.gap - a.gap)                                              // 落后越多 = 补涨空间越大
-        .slice(0,8);
-    }
-    renderSsMain(main, mainAll.length);
+    const all = parse(ind0).concat(parse(ind1), parse(con0), parse(con1))
+      .filter(s=>s.f14 && !NOISE.test(s.f14) && (s.f6||0)/1e8 >= MIN_AMT)
+      .map(s=>{
+        const up = s.f104||0, down = s.f105||0, total = up+down;
+        return {name:s.f14, code:s.f12, chg:s.f3||0, amt:(s.f6||0)/1e8, up, down, upRatio: total>0 ? up/total : 0};
+      });
+    if(all.length){
+      // 归一化复合评分：涨幅55%(主导=今日真实强度) + 成交额25%(资金厚度) + 上涨家数占比20%(板块内广度)
+      // 旧版成交额权重40%过高，钱多但下跌的大板块(电子/芯片)会压过真涨的小板块，榜单全绿
+      const norm=(a)=>{const mx=Math.max.apply(null,a),mn=Math.min.apply(null,a);return v=>mx===mn?0:(v-mn)/(mx-mn);};
+      const nC=norm(all.map(s=>s.chg)), nA=norm(all.map(s=>s.amt)), nR=norm(all.map(s=>s.upRatio));
+      all.forEach(s=>{ s.score = 100*(0.55*nC(s.chg)+0.25*nA(s.amt)+0.20*nR(s.upRatio)); });
+    } else { all.forEach(s=>s.score=0); }
+    const mainCandidates = all.slice().sort((a,b)=>b.score-a.score).slice(0,15);
+    const main = mainCandidates.slice(0,10);
+    // 低位补涨只在热度前15里挑"涨得最少但成交额够"的板块；市场普跌日本身无正涨幅板块时自然为空
+    const low = mainCandidates.filter(s=>s.chg>0 && s.chg<3 && s.amt>=50).sort((a,b)=>a.chg-b.chg).slice(0,8);
+    renderSsMain(main);
     renderSsLow(low);
-    // 趋势增强：异步拉成分股历史日K，判定"已走出来"(站上MA20+多头排列+MACD向上)，标记真·主流板块（不阻塞首屏）
-    enhanceTrend(mainAll.slice(0,12)).then(()=>{ renderSsMain(main, mainAll.length); }).catch(()=>{});
+    // 趋势增强：异步拉历史日K，判定"已走出来"(站上MA20+多头排列)，过滤一日游，标记真·主流板块（不阻塞首屏）
+    enhanceTrend(mainCandidates.slice(0,12)).then(()=>{ renderSsMain(main); }).catch(()=>{});
   }
-  function renderSsMain(list, totalMain){
+  function renderSsMain(list){
     const el = document.getElementById('ssMainline');
-    if(!list || !list.length){
-      const nDays = (STATE.sectorFlowHist && STATE.sectorFlowHist.days) ? Object.keys(STATE.sectorFlowHist.days).length : 0;
-      el.innerHTML = '<div class="ss-row"><span class="ss-name">当前无清晰主线</span></div>'+
-        '<div class="ss-row ss-note-sm">近 '+nDays+' 个交易日未形成「资金持续净流入 + 价格走出」的共识板块。按顺势纪律应控仓/观望，不强行交易；历史每日累积后将自动识别主线。</div>';
-      return;
-    }
-    const gotTrend = list.some(s=>s.trend);
-    el.innerHTML = list.map(s=>{
-      const c = (s.rtChg||0)>=0?'up-c':'down-c';
+    if(!list || !list.length){ el.innerHTML = '<div class="ss-row"><span class="ss-name">板块数据暂不可用</span></div>'; return; }
+    const allDown = list.every(s=>s.chg<0);
+    el.innerHTML = list.map((s,i)=>{
+      const c = s.chg>=0?'up-c':'down-c';
       const t = s.trend;                                  // {aboveMa20,bull,macdUp,bias20,ma20/5/10,dif,dea,macd,price,advice}
       const isMain = !!(t && t.bull && t.macdUp);         // 真·主流：当日强 + 均线多头排列 + MACD向上
       const trendTag = t
@@ -5876,33 +5809,34 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
                 ? '<span class="ss-chip" title="站上MA20，MACD '+t.advice+'">'+t.advice+'</span>'
                 : '<span class="ss-chip weak" title="MA20下方">'+t.advice+'</span>'))
         : '';
-      const statChips = [
-        '<span class="ss-chip" title="多日累计主力净流入(亿)">主力净额 '+s.cumNet.toFixed(0)+'亿</span>',
-        '<span class="ss-chip" title="净流入天数/总交易日">'+Math.round(s.netUpRatio*100)+'%日净流入</span>'
-      ];
-      if(s.hasChg) statChips.push('<span class="ss-chip" title="可用历史累计涨幅%">'+(s.cumChg>=0?'+':'')+s.cumChg.toFixed(1)+'%</span>');
+      const upDownChip = s.up>0 || s.down>0
+        ? '<span class="ss-chip">涨'+s.up+'/跌'+s.down+'</span>'
+        : '';
       return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
-        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.rtChg||0)+'</span></span>'+
-        '<span class="ss-tagline">'+statChips.join('')+trendTag+(isMain?'<span class="ss-badge main">主流板块</span>':'')+'</span></div>';
+        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
+        '<span class="ss-tagline"><span class="ss-chip">'+s.amt.toFixed(0)+'亿</span>'+
+        upDownChip +
+        trendTag +
+        (isMain?'<span class="ss-badge main">主流板块</span>':'')+'</span></div>';
     }).join('');
-    if(gotTrend){
-      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">✓ 趋势=成分股(新浪日K)等权合成·均线(MA5/10/20)+MACD；仅「多头排列+MACD向上」标「主流板块」</div>');
-    } else {
-      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势合成暂未取到，已按「多日资金净流入+价格」排主线；刷新后自动重试</div>');
+    if(allDown){
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">今日板块普跌，榜单按「相对强度」排序：绿盘=跌得最少/资金最活跃/内部上涨家数占比最高</div>');
     }
-    if(totalMain!==undefined && totalMain>list.length){
-      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">共识别 '+totalMain+' 条主线候选，仅展示强度前 '+list.length+'</div>');
+    const gotTrend = list.some(s=>s.trend);
+    if(gotTrend){
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">✓ 趋势=成分股(新浪日K)等权合成·已叠加均线(MA5/10/20)+MACD；仅「多头排列+MACD向上」标「主流板块」</div>');
+    } else {
+      el.insertAdjacentHTML('beforeend','<div class="ss-row ss-note-sm">⚠ 趋势合成暂未取到(成分股K线缺失)，已显示当日强度；刷新后自动重试</div>');
     }
   }
   function renderSsLow(list){
     const el = document.getElementById('ssLow');
-    if(!list || !list.length){ el.innerHTML = '<div class="ss-row"><span class="ss-name">主线内暂无补涨候选</span></div><div class="ss-row ss-note-sm">仅当主线整体上行、且主线内部存在「今日落后主线均涨幅」的板块时展示；非主线一律不展示。</div>'; return; }
+    if(!list || !list.length){ el.innerHTML = '<div class="ss-row"><span class="ss-name">暂无低涨幅放量板块</span></div>'; return; }
     el.innerHTML = list.map(s=>{
-      const c = (s.rtChg||0)>=0?'up-c':'down-c';
-      const catTag = '<span class="ss-chip">'+ (s.cat||'板块') +'</span>';
+      const c = s.chg>=0?'up-c':'down-c';
       return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
-        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.rtChg||0)+'</span></span>'+
-        '<span class="ss-tagline">'+catTag+'<span class="ss-chip" title="今日落后主线均涨幅，即补涨空间">落后 '+s.gap.toFixed(1)+'%</span><span class="ss-badge low">补涨</span></span></div>';
+        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
+        '<span class="ss-tagline"><span class="ss-chip">'+s.amt.toFixed(0)+'亿</span><span class="ss-badge low">埋伏</span></span></div>';
     }).join('');
   }
 
@@ -6050,57 +5984,9 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     const rb=document.getElementById('ssRefreshBtn');
     if(rb) rb.onclick=()=>renderShunshiBoard();
   }
-  // ---------- 主线补涨观察（个股）：主线板块内相对低位龙头，技术位 2026-08-06 收盘快照 ----------
-  const CATCHUP_STOCKS = [
-    {code:'300502', name:'新易盛',   sector:'通信设备', vsMa20:-11.2, offHi:-25.8},
-    {code:'300308', name:'中际旭创', sector:'通信设备', vsMa20:-6.8,  offHi:-19.3},
-    {code:'688981', name:'中芯国际', sector:'电子',     vsMa20:-12.2, offHi:-24.1},
-    {code:'002384', name:'东山精密', sector:'元件',     vsMa20:-11.0, offHi:-30.2},
-    {code:'688256', name:'寒武纪',   sector:'电子',     vsMa20:-4.4,  offHi:-17.2},
-    {code:'300394', name:'天孚通信', sector:'通信设备', vsMa20:+3.9,  offHi:-17.6},
-    {code:'601869', name:'长飞光纤', sector:'通信设备', vsMa20:-4.4,  offHi:-22.8},
-    {code:'002379', name:'宏桥控股', sector:'有色金属', vsMa20:+0.6,  offHi:-10.2},
-    {code:'600549', name:'厦门钨业', sector:'小金属',   vsMa20:+10.6, offHi:-9.3},
-    {code:'000657', name:'中钨高新', sector:'小金属',   vsMa20:+5.2,  offHi:-16.4},
-    {code:'603019', name:'中科曙光', sector:'计算机',   vsMa20:-6.1,  offHi:-18.3},
-    {code:'300567', name:'精测电子', sector:'设备',     vsMa20:-7.4,  offHi:-30.0},
-    {code:'301666', name:'大普微-UW',sector:'计算机',   vsMa20:-7.1,  offHi:-21.9},
-  ];
-  async function renderSsCatchup(){
-    const el = document.getElementById('ssCatchup');
-    if(!el) return;
-    const pre = CATCHUP_STOCKS.map(s => (s.code[0]==='6' ? 'sh' : 'sz') + s.code);
-    const url = 'https://qt.gtimg.cn/q=' + pre.join(',') + '&_=' + Date.now();
-    const q = {};
-    await new Promise(res=>{
-      const sc = document.createElement('script');
-      sc.onload = ()=>{
-        pre.forEach((k,i)=>{
-          const raw = window['v_'+k];
-          if(raw){ const v = raw.split('~'); const chg = parseFloat(v[32]); q[CATCHUP_STOCKS[i].code] = isNaN(chg)?0:chg; }
-        });
-        sc.remove(); res();
-      };
-      sc.onerror = ()=>{ sc.remove(); res(); };
-      sc.src = url; document.body.appendChild(sc);
-    });
-    el.innerHTML = CATCHUP_STOCKS.map(s=>{
-      const chg = q[s.code]!=null ? q[s.code] : 0;
-      const c = chg>=0 ? 'up-c' : 'down-c';
-      const lag = s.vsMa20 < 0 ? ('对MA20 '+s.vsMa20.toFixed(1)+'%') : '已站上MA20';
-      return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
-        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(chg)+'</span></span>'+
-        '<span class="ss-tagline"><span class="ss-chip">'+s.sector+'</span>'+
-        '<span class="ss-chip">'+lag+'</span>'+
-        '<span class="ss-chip weak">距高'+s.offHi.toFixed(1)+'%</span></span></div>';
-    }).join('') +
-    '<div class="ss-row ss-note-sm">技术位为 2026-08-06 收盘快照（对MA20 / 距20日高点）；涨跌幅实时刷新。仅主线内相对低位候选，非个股推荐</div>';
-  }
-
   function ssGo(){
     bindSsEvents(); renderShunshiBoard();
     setInterval(renderShunshiBoard, 60000); // 60s 刷新；指数MA20/自选tech 各自5分钟缓存
-    renderSsCatchup(); setInterval(renderSsCatchup, 5000); // 主线补涨观察：实时涨跌幅，5s 刷新
   }
   if(document.readyState!=='loading') setTimeout(ssGo, 600);
   else document.addEventListener('DOMContentLoaded', ()=>setTimeout(ssGo, 600));
