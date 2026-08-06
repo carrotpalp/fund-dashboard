@@ -1,40 +1,34 @@
 {
-  "updatedAt": "2026-08-06T18:47:20",
+  "updatedAt": "2026-08-06T20:48:50",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
       "code": "377240",
-      "name": "摩根新兴动力混合A",
-      "nav": 11.0039,
-      "prevNav": 10.7287,
-      "navDate": "2026-08-05",
+      "name": "",
+      "nav": 10.9655,
+      "prevNav": 11.0039,
+      "navDate": "2026-08-06",
       "isQDII": false,
       "isToday": true,
-      "isOfficial": false,
-      "estNav": 10.9883,
-      "estChgPct": -0.14,
-      "estChgAmt": -0.0156,
-      "stockPct": 92.5,
-      "topWeightSum": 57.35,
-      "holdingsCount": 11,
-      "estTime": "2026-08-06 18:47"
+      "estNav": 10.9655,
+      "estChgPct": -0.349,
+      "estChgAmt": -0.0384,
+      "isOfficial": true,
+      "estTime": "2026-08-06"
     },
     "000979": {
       "code": "000979",
-      "name": "景顺长城沪港深精选股票A",
-      "nav": 4.754,
-      "prevNav": 4.68,
-      "navDate": "2026-08-05",
+      "name": "",
+      "nav": 4.762,
+      "prevNav": 4.754,
+      "navDate": "2026-08-06",
       "isQDII": false,
       "isToday": true,
-      "isOfficial": false,
-      "estNav": 4.8149,
-      "estChgPct": 1.28,
-      "estChgAmt": 0.0609,
-      "stockPct": 91.4,
-      "topWeightSum": 56.67,
-      "holdingsCount": 10,
-      "estTime": "2026-08-06 18:47"
+      "estNav": 4.762,
+      "estChgPct": 0.1683,
+      "estChgAmt": 0.008,
+      "isOfficial": true,
+      "estTime": "2026-08-06"
     }
   }
 }
