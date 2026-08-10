@@ -2964,6 +2964,24 @@ function shanghaiToday(){
   const d = new Date(Date.now() + 8*3600*1000);
   return d.toISOString().slice(0,10);
 }
+// 合并「深度历史回填」：云每日快照(push2delay)只含当日、无历史p/c，且 push2his 非中国IP不可用，
+// 故历史回补单独存于 sector_flow_backfill.json（云不会覆盖），在此合并进主线/背离计算。
+function mergeSectorBackfill(live, back){
+  if(!back || !back.days) return live;
+  if(!live || !live.days) return back;
+  const days = live.days;
+  for(const d in back.days){
+    if(!days[d]){ days[d] = back.days[d]; continue; }
+    for(const code in back.days[d]){
+      const be = back.days[d][code], le = days[d][code];
+      if(!le){ days[d][code] = be; continue; }
+      if(typeof le.p !== 'number' && typeof be.p === 'number') le.p = be.p;
+      if(typeof le.c !== 'number' && typeof be.c === 'number') le.c = be.c;
+      if(!le.name && be.name) le.name = be.name;
+    }
+  }
+  return live;
+}
 async function loadSectorFlowHist(){
   try{
     const r = await fetch('./sector_flow_history.json', {cache:'no-store'});
@@ -2971,6 +2989,14 @@ async function loadSectorFlowHist(){
     const j = await r.json();
     STATE.sectorFlowHist = (j && j.days) ? j : null;
   }catch(e){ STATE.sectorFlowHist = null; }
+  // 合并深度历史回填（不依赖被墙的 push2his）
+  try{
+    const rb = await fetch('./sector_flow_backfill.json', {cache:'no-store'});
+    if(rb.ok){
+      const b = await rb.json();
+      if(b && b.days) STATE.sectorFlowHist = mergeSectorBackfill(STATE.sectorFlowHist, b);
+    }
+  }catch(e){}
 }
 // 计算每个板块「截至最近一日的连续同号天数」(连续净流入/净流出) 及累计净额
 function computeSectorStreaks(){
