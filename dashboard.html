@@ -692,6 +692,11 @@ html.light .theme-btn::after{content:'☀️';left:16px}
 .ss-event-item .ss-ecount.past{color:var(--down)}
 .ss-event-item button{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;line-height:1}
 .ss-note{margin-top:10px;font-size:10px;color:var(--text-3);line-height:1.5}
+.ss-pick-group{margin-bottom:8px}
+.ss-pick-group:last-child{margin-bottom:0}
+.ss-pick-h{font-size:11px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:6px;padding:3px 6px;background:rgb(from var(--up) r g b /.10);border-radius:4px;margin-bottom:4px}
+.ss-pick-h .ss-code{color:var(--text-3);font-size:10px;font-family:var(--mono);margin-left:2px}
+.ss-pick-h .ss-badge.main{margin-left:auto}
 @media(max-width:980px){ .ss-grid{grid-template-columns:1fr} }
 </style>
 <script>(function(){ try{ if(localStorage.getItem('ashare_theme_v1')==='light') document.documentElement.classList.add('light'); }catch(e){} })();</script>
@@ -951,7 +956,7 @@ html.light .theme-btn::after{content:'☀️';left:16px}
           <div class="ss-card ss-mainline"><h4>🔥 主线榜 <span class="ss-tag">雷立刚·持续性门槛：跑赢大盘≥60% + 累计超额为正 + 前后半段均≥50% + 回撤>-30%；无共识则空态</span></h4><div class="ss-list" id="ssMainline"></div></div>
           <div class="ss-card ss-watch"><h4>📌 自选股信号条 <span class="ss-tag">个股MA(新浪)+量比涨跌(腾讯) · 顺势参考</span></h4><div class="ss-watch-grid" id="ssWatch"></div></div>
           <div class="ss-card ss-low"><h4>🔍 低位补涨探针 <span class="ss-tag">仅主线内部 · 今日落后主线均涨幅的补涨候选（非主线不展示）</span></h4><div class="ss-list" id="ssLow"></div></div>
-          <div class="ss-card ss-catchup"><h4>📊 主线补涨观察 <span class="ss-tag">主线内相对低位个股 · 技术位 2026-08-06 快照 · 涨跌幅实时</span></h4><div class="ss-list" id="ssCatchup"></div></div>
+          <div class="ss-card ss-pick"><h4>🎯 选股层 <span class="ss-tag">雷立刚·只做主流+挑一批：主流板块内按「涨幅+主力净流入+流动性」挑前5（自动生成）</span></h4><div class="ss-list" id="ssPick"></div></div>
         </div>
         <div class="ss-note">数据地基（雷立刚框架）：① <b>大盘定调·知进退</b> = 上证/创业板日K(新浪, 320日)算 年线(250MA)/60日/20日 + 年线方向(拐头) + 量能比 + 市场广度(东财)；三态判仓位——上升明朗期(站上年线+年线拐头+量能不缩)→满仓满融干主流；趋势混沌期(站上60日但年线未确认)→降杠杆灵活短线；下跌明朗期(跌破60日/年线向下)→空仓逆回购。② <b>主线榜·懂取舍</b> = 行业/概念板块历史(回补25+交易日)算「持续跑赢大盘占比≥60% + 累计超额为正 + 前后两半段均≥50%跑赢 + 最大回撤>-30%」为真·主流门槛，过滤一日游/二日游；仅展示最强前3，无共识则空态(按纪律控仓不交易)。③ <b>低位补涨探针</b> = 主线内部「今日落后主线均涨幅」的板块(非主线不展示)。④ 自选股信号条 = 自选股MA(新浪)+量比涨跌(腾讯)。本看板为交易纪律辅助，所有信号仅供参考，不构成投资建议。</div>
       </div>
@@ -5934,6 +5939,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
         .sort((a,b)=> b.gap - a.gap).slice(0,8);
     }
     renderSsLow(low);
+    STATE.ssMainAll = mainAll;
   }
   function renderSsMain(list, totalMain, note){
     const el = document.getElementById('ssMainline');
@@ -6024,6 +6030,7 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     if(sub) sub.textContent='刷新中…';
     try{
       await Promise.allSettled([ fetchSsRegime(), fetchSsSectors(), fetchSsWatch() ]);
+      await fetchSsPick().catch(e=>console.error('ssPick', e));
     }catch(e){ console.error('shunshi', e); }
     finally{ if(sub) sub.textContent='更新 '+new Date().toTimeString().slice(0,5); _ssBusy=false; }
   }
@@ -6031,57 +6038,64 @@ try{ const rb=document.getElementById('resetLayout'); if(rb) rb.addEventListener
     const rb=document.getElementById('ssRefreshBtn');
     if(rb) rb.onclick=()=>renderShunshiBoard();
   }
-  // ---------- 主线补涨观察（个股）：主线板块内相对低位龙头，技术位 2026-08-06 收盘快照 ----------
-  const CATCHUP_STOCKS = [
-    {code:'300502', name:'新易盛',   sector:'通信设备', vsMa20:-11.2, offHi:-25.8},
-    {code:'300308', name:'中际旭创', sector:'通信设备', vsMa20:-6.8,  offHi:-19.3},
-    {code:'688981', name:'中芯国际', sector:'电子',     vsMa20:-12.2, offHi:-24.1},
-    {code:'002384', name:'东山精密', sector:'元件',     vsMa20:-11.0, offHi:-30.2},
-    {code:'688256', name:'寒武纪',   sector:'电子',     vsMa20:-4.4,  offHi:-17.2},
-    {code:'300394', name:'天孚通信', sector:'通信设备', vsMa20:+3.9,  offHi:-17.6},
-    {code:'601869', name:'长飞光纤', sector:'通信设备', vsMa20:-4.4,  offHi:-22.8},
-    {code:'002379', name:'宏桥控股', sector:'有色金属', vsMa20:+0.6,  offHi:-10.2},
-    {code:'600549', name:'厦门钨业', sector:'小金属',   vsMa20:+10.6, offHi:-9.3},
-    {code:'000657', name:'中钨高新', sector:'小金属',   vsMa20:+5.2,  offHi:-16.4},
-    {code:'603019', name:'中科曙光', sector:'计算机',   vsMa20:-6.1,  offHi:-18.3},
-    {code:'300567', name:'精测电子', sector:'设备',     vsMa20:-7.4,  offHi:-30.0},
-    {code:'301666', name:'大普微-UW',sector:'计算机',   vsMa20:-7.1,  offHi:-21.9},
-  ];
-  async function renderSsCatchup(){
-    const el = document.getElementById('ssCatchup');
+  // ---------- 选股层（雷立刚·只做主流+挑一批）：主流板块内按「涨幅+主力净流入+流动性」挑前5 ----------
+  // 复用全局 emJsonp（push2→push2delay 自动回落），板块成分股经 fs=b:{BK编码} 拉取
+  async function _pickBoardStocks(boardCode, topN){
+    try{
+      const j = await emJsonp({fs:'b:'+boardCode, fields:'f12,f14,f3,f62,f21', pn:1, pz:200, po:1, np:1, fltt:2, invt:2}, 'push2.eastmoney.com');
+      const diff = (j && j.data && j.data.diff) || [];
+      const arr = diff.filter(s=>s.f12 && /^\d{6}$/.test(s.f12)).map(s=>({
+        code:s.f12, name:s.f14,
+        chg:(typeof s.f3==='number'?s.f3:0),
+        mainNet:(typeof s.f62==='number'?s.f62:0),
+        floatCap:(typeof s.f21==='number'?s.f21:0)
+      }));
+      if(!arr.length) return [];
+      const caps = arr.map(s=>s.floatCap).filter(v=>v>0).sort((a,b)=>a-b);
+      const medCap = caps.length ? caps[Math.floor(caps.length/2)] : 1;
+      arr.forEach(s=>{
+        // 强度分：今日涨幅 + 主力净流入正向加成/净流出惩罚 + 流动性达中位以上加成
+        s.strength = s.chg + (s.mainNet>0 ? 1 : -0.5) + (s.floatCap>=medCap ? 0.5 : 0);
+      });
+      return arr.sort((a,b)=>b.strength-a.strength).slice(0, topN);
+    }catch(e){ console.warn('pickBoard', boardCode, e.message); return []; }
+  }
+  async function fetchSsPick(){
+    const el = document.getElementById('ssPick');
     if(!el) return;
-    const pre = CATCHUP_STOCKS.map(s => (s.code[0]==='6' ? 'sh' : 'sz') + s.code);
-    const url = 'https://qt.gtimg.cn/q=' + pre.join(',') + '&_=' + Date.now();
-    const q = {};
-    await new Promise(res=>{
-      const sc = document.createElement('script');
-      sc.onload = ()=>{
-        pre.forEach((k,i)=>{
-          const raw = window['v_'+k];
-          if(raw){ const v = raw.split('~'); const chg = parseFloat(v[32]); q[CATCHUP_STOCKS[i].code] = isNaN(chg)?0:chg; }
-        });
-        sc.remove(); res();
-      };
-      sc.onerror = ()=>{ sc.remove(); res(); };
-      sc.src = url; document.body.appendChild(sc);
-    });
-    el.innerHTML = CATCHUP_STOCKS.map(s=>{
-      const chg = q[s.code]!=null ? q[s.code] : 0;
-      const c = chg>=0 ? 'up-c' : 'down-c';
-      const lag = s.vsMa20 < 0 ? ('相对MA20 '+s.vsMa20.toFixed(1)+'%') : '已收复MA20';
-      return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
-        '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(chg)+'</span></span>'+
-        '<span class="ss-tagline"><span class="ss-chip">'+s.sector+'</span>'+
-        '<span class="ss-chip">'+lag+'</span>'+
-        '<span class="ss-chip weak">距高'+s.offHi.toFixed(1)+'%</span></span></div>';
-    }).join('') +
-    '<div class="ss-row ss-note-sm">技术位为 2026-08-06 收盘快照（对MA20 / 距20日高点）；涨跌幅实时刷新。仅主线内相对低位候选，非个股推荐</div>';
+    const mains = (STATE.ssMainAll && STATE.ssMainAll.length) ? STATE.ssMainAll.slice(0,3) : [];
+    if(!mains.length){
+      el.innerHTML = '<div class="ss-row"><span class="ss-name">当前无清晰主线，无可挑个股</span></div>'+
+        '<div class="ss-row ss-note-sm">按雷立刚纪律：无主流板块则不做选股，控仓观望，等主流走出来再挑一批。</div>';
+      return;
+    }
+    let html = '';
+    for(const b of mains){
+      const stocks = await _pickBoardStocks(b.code, 5).catch(()=>[]);
+      html += '<div class="ss-pick-group"><div class="ss-pick-h"><span>'+b.name+'</span><span class="ss-code">'+b.code+'</span><span class="ss-badge main">主流</span></div>';
+      if(!stocks.length){
+        html += '<div class="ss-row ss-note-sm">成分股获取失败（东财接口受限/空板块），跳过</div>';
+      } else {
+        html += stocks.map(s=>{
+          const c = s.chg>=0?'up-c':'down-c';
+          const netCls = s.mainNet>0?'bull':'bear';
+          const netTxt = '主力'+(s.mainNet>=0?'+':'')+(s.mainNet/1e8).toFixed(1)+'亿';
+          const capTxt = '流值'+(s.floatCap/1e8).toFixed(0)+'亿';
+          return '<div class="ss-row"><span class="ss-name">'+s.name+'<span class="ss-code">'+s.code+'</span></span>'+
+            '<span class="ss-val"><span class="'+c+'">'+ssFmtPct(s.chg)+'</span></span>'+
+            '<span class="ss-tagline"><span class="ss-chip">'+capTxt+'</span>'+
+            '<span class="ss-chip '+netCls+'">'+netTxt+'</span></span></div>';
+        }).join('');
+      }
+      html += '</div>';
+    }
+    el.innerHTML = html;
   }
 
   function ssGo(){
     bindSsEvents(); renderShunshiBoard();
     setInterval(renderShunshiBoard, 60000); // 60s 刷新；指数MA20/自选tech 各自5分钟缓存
-    renderSsCatchup(); setInterval(renderSsCatchup, 5000); // 主线补涨观察：实时涨跌幅，5s 刷新
+    // 选股层已随 renderShunshiBoard 的 60s 周期刷新（fetchSsPick 在主线识别后自动挑股）
   }
   if(document.readyState!=='loading') setTimeout(ssGo, 600);
   else document.addEventListener('DOMContentLoaded', ()=>setTimeout(ssGo, 600));
