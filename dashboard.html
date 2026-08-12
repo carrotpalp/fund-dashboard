@@ -3853,7 +3853,7 @@ function plOf(w){                            // 当日收益(元) = 持有数量
   if(!dailyVisible(w)) return null;
   return w.units * w.q.change_amt;
 }
-function costEntered(w){ return !!(w && w.cost>0 && w.units>0); }      // 已填成本价且持有数量>0
+function costEntered(w){ return !!(w && w.units>0 && typeof w.cost==='number' && !isNaN(w.cost) && w.cost!==0); }      // 已填成本价(含负数,如做T后负成本)且持有数量>0
 function costValue(w){ if(!costEntered(w)) return null; return w.units * w.cost; }            // 持仓成本(元)=持有数量×成本价
 function cumPl(w){ if(!costEntered(w) || !w.q || !(w.q.price>0)) return null; return w.units*(w.q.price - w.cost); } // 累计收益(元)=持有数量×(现价−成本价)
 // 场外基金净值徽标：QDII 等特殊类型标注对应净值日期，避免用户误读“闪跳的估算”
