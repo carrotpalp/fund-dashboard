@@ -3886,12 +3886,14 @@ function renderWatchlistFooter(){
   const wl=STATE.watchlist||[];
   let totalMkt=0, totalPl=0, totalTpl=0, anyPl=false, anyTpl=false, holdCnt=0;
   const plByMkt={ashare:0,hk:0,fund:0}; const mktHas={ashare:false,hk:false,fund:false};
+  const mktByMkt={ashare:0,hk:0,fund:0}; const mktValHas={ashare:false,hk:false,fund:false};
   for(const w of wl){
     const mkt=mktValue(w);
     if(mkt!==null && isFinite(mkt)){
       totalMkt+=mkt; holdCnt++;
+      const mk=marketOf(w); mktByMkt[mk]+=mkt; mktValHas[mk]=true;
       const pl=plOf(w);
-      if(pl!==null && isFinite(pl)){ totalPl+=pl; anyPl=true; const mk=marketOf(w); plByMkt[mk]+=pl; mktHas[mk]=true; }
+      if(pl!==null && isFinite(pl)){ totalPl+=pl; anyPl=true; plByMkt[mk]+=pl; mktHas[mk]=true; }
       const tpl=cumPl(w); if(tpl!==null && isFinite(tpl)){ totalTpl+=tpl; anyTpl=true; }   // 累计收益=持有数量×(现价−成本价)
     }
   }
@@ -3904,8 +3906,10 @@ function renderWatchlistFooter(){
   const tplCls = anyTpl ? (totalTpl>0?'up-c':(totalTpl<0?'down-c':'')) : '';
   const seg = (key,label,val,has)=> has ? `<span class="seg seg-${key} ${val>0?'up-c':(val<0?'down-c':'')}">${label} ${fmtMoneyInline(val)}</span>` : '';
   const segs = seg('a','A股',plByMkt.ashare,mktHas.ashare)+seg('h','港股',plByMkt.hk,mktHas.hk)+seg('f','场外基金',plByMkt.fund,mktHas.fund);
+  const segMkt = (key,label,val,has)=> has ? `<span class="seg seg-${key}">${label} ${fmtMoneyInline(val)}</span>` : '';
+  const segsMkt = segMkt('a','A股',mktByMkt.ashare,mktValHas.ashare)+segMkt('h','港股',mktByMkt.hk,mktValHas.hk)+segMkt('f','场外基金',mktByMkt.fund,mktValHas.fund);
   el.innerHTML =
-    `<span class="wl-stat"><span class="wl-stat-lbl">持仓总市值</span><b class="wl-stat-val">${fmtMoney(totalMkt)}</b></span>`+
+    `<span class="wl-stat"><span class="wl-stat-lbl">持仓总市值</span><b class="wl-stat-val">${fmtMoney(totalMkt)}</b>${segsMkt?`<span class="wl-stat-sep">${segsMkt}</span>`:''}</span>`+
     `<span class="wl-stat"><span class="wl-stat-lbl">今日预估收益</span><b class="wl-stat-val ${plCls}">${anyPl?fmtMoney(totalPl):'—'}</b>${segs?`<span class="wl-stat-sep">${segs}</span>`:''}</span>`+
     `<span class="wl-stat"><span class="wl-stat-lbl">累计收益</span><b class="wl-stat-val ${tplCls}">${anyTpl?fmtMoney(totalTpl):'—'}</b></span>`;
   el.dataset.mode='summary';
@@ -4067,7 +4071,7 @@ function renderWatchlist(){
     const plHtml = pl===null?'—':fmtMoney(pl);
     const plCls = pl!==null ? (pl>0?'up-c':(pl<0?'down-c':'')) : '';
     const unitsCell = `<input class="wl-units" data-code="${w.code}" type="number" min="0" step="any" value="${w.units||''}" placeholder="${ph}">`;
-    const costCell = `<input class="wl-cost" data-code="${w.code}" type="number" min="0" step="any" value="${w.cost||''}" placeholder="成本" title="你的持仓成本价（每股/每份额），用于计算累计收益">`;
+    const costCell = `<input class="wl-cost" data-code="${w.code}" type="number" step="any" value="${w.cost||''}" placeholder="成本" title="你的持仓成本价（每股/每份额），用于计算累计收益；支持负成本（如做T后成本为负的获利仓）">`;
     const cv=costValue(w), cvHtml=cv===null?'—':fmtMoney(cv);
     const tpl=cumPl(w), tplCls=tpl!==null?(tpl>0?'up-c':(tpl<0?'down-c':'')):'', tplHtml=tpl===null?'—':fmtMoney(tpl);
     return `<tr draggable="true" data-idx="${idx}" data-code="${w.code}">
