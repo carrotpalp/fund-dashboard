@@ -5346,7 +5346,7 @@ async function refreshWatchlistQuotes(){
       if(q){ w.q = q; if(!w.q.name && w.name) w.q.name = w.name; else if(w.q.name && !w.name){ w.name = w.q.name; nameChanged=true; } }
     }));
   }
-  if(nameChanged){ try{ saveWL(); }catch(e){} renderWatchlist(); }  // 名称首次解析后重绘，使名称列显示中文名
+  if(nameChanged){ try{ saveWL(); }catch(e){} if(!wlDragging) renderWatchlist(); }  // 名称首次解析后重绘；拖拽进行中跳过，避免重建打断拖拽
   updateWatchlistLive();
   }catch(e){ console.error('refreshWatchlistQuotes', e); }
   finally{ wlQRefreshing=false; }
@@ -5382,31 +5382,51 @@ async function refreshWatchlist(){
   await Promise.allSettled([refreshWatchlistQuotes(), refreshWatchlistFunds()]);
 }
 let wlDragSrc = null;
+let wlDragOverRow = null;   // 当前拖拽悬停目标行（单一来源，避免 dragleave 子元素冒泡误触发）
+let wlDragging = false;     // 拖拽进行中标志，防止刷新重建打断
 let lastFundGz = 0;                 // 场外基金估算净值拉取节流时间戳
 const fundGzCache = {};             // 场外基金盘中估算缓存（按代码，1s 刷新）
 const lastFundNav = {};             // 场外基金官方净值(pingzhongdata)拉取节流（按代码，60s 一次，不频繁）
 function initWlDrag(){
   const tbody = document.getElementById('wlTbody');
   if(!tbody) return;
-  tbody.querySelectorAll('tr').forEach(row=>{
-    row.draggable = true;
-    row.addEventListener('dragstart', e=>{
-      wlDragSrc = row; row.classList.add('wl-dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', row.dataset.idx);
-    });
-    row.addEventListener('dragend', ()=>{ row.classList.remove('wl-dragging'); tbody.querySelectorAll('tr').forEach(r=>r.classList.remove('wl-drag-over')); wlDragSrc=null; });
-    row.addEventListener('dragover', e=>{ e.preventDefault(); if(row!==wlDragSrc) row.classList.add('wl-drag-over'); });
-    row.addEventListener('dragleave', ()=>{ row.classList.remove('wl-drag-over'); });
-    row.addEventListener('drop', e=>{
-      e.preventDefault();
-      row.classList.remove('wl-drag-over');
-      if(!wlDragSrc || row===wlDragSrc) return;
-      const from = parseInt(wlDragSrc.dataset.idx,10), to = parseInt(row.dataset.idx,10);
-      if(isNaN(from)||isNaN(to)) return;
-      const item = STATE.watchlist.splice(from,1)[0];
-      STATE.watchlist.splice(to,0,item);
-      saveWL(); renderWatchlist();
-    });
-  });
+  // 事件委托到 tbody：drop/dragover 落在行内任意位置(含单元格、两行交界缝隙)都能通过 closest('tr') 定位目标行，
+  // 避免原「drop 只绑在 tr、落在缝隙则静默失败」导致要拖好几次才成功。
+  const clearOver = ()=>{ if(wlDragOverRow){ wlDragOverRow.classList.remove('wl-drag-over'); wlDragOverRow=null; } };
+  tbody.ondragstart = e=>{
+    const row = e.target.closest('tr[data-code]');
+    if(!row) return;
+    wlDragSrc = row; row.classList.add('wl-dragging'); wlDragging = true;
+    e.dataTransfer.effectAllowed='move';
+    try{ e.dataTransfer.setData('text/plain', row.dataset.idx); }catch(_){}
+  };
+  tbody.ondragenter = e=>{ e.preventDefault(); };   // 规范：dragenter 也需 preventDefault 才允许 drop
+  tbody.ondragover = e=>{
+    e.preventDefault();
+    if(e.dataTransfer) e.dataTransfer.dropEffect='move';
+    const row = e.target.closest('tr[data-code]');
+    if(row !== wlDragOverRow){
+      clearOver();
+      if(row && row !== wlDragSrc){ row.classList.add('wl-drag-over'); wlDragOverRow = row; }
+    }
+  };
+  tbody.ondrop = e=>{
+    e.preventDefault();
+    const row = e.target.closest('tr[data-code]');
+    clearOver();
+    if(!wlDragSrc || !row || row === wlDragSrc) return;
+    const from = parseInt(wlDragSrc.dataset.idx,10), to = parseInt(row.dataset.idx,10);
+    if(isNaN(from) || isNaN(to)) return;
+    const item = STATE.watchlist.splice(from,1)[0];
+    if(!item) return;
+    STATE.watchlist.splice(to,0,item);
+    saveWL(); renderWatchlist();
+  };
+  tbody.ondragend = ()=>{
+    clearOver();
+    if(wlDragSrc) wlDragSrc.classList.remove('wl-dragging');
+    wlDragSrc = null; wlDragging = false;
+  };
 }
 
 /* ===================== 刷新循环 ===================== */
