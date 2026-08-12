@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-12T20:27:56",
+  "updatedAt": "2026-08-12T22:01:53",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
@@ -13,6 +13,20 @@
       "estNav": 11.2668,
       "estChgPct": 1.8219,
       "estChgAmt": 0.2016,
+      "isOfficial": true,
+      "estTime": "2026-08-12"
+    },
+    "000979": {
+      "code": "000979",
+      "name": "",
+      "nav": 4.873,
+      "prevNav": 4.732,
+      "navDate": "2026-08-12",
+      "isQDII": false,
+      "isToday": true,
+      "estNav": 4.873,
+      "estChgPct": 2.9797,
+      "estChgAmt": 0.141,
       "isOfficial": true,
       "estTime": "2026-08-12"
     }
