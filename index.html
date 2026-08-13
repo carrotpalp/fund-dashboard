@@ -3890,6 +3890,7 @@ function renderWatchlistFooter(){
   let totalMkt=0, totalPl=0, totalTpl=0, anyPl=false, anyTpl=false, holdCnt=0;
   const plByMkt={ashare:0,hk:0,fund:0}; const mktHas={ashare:false,hk:false,fund:false};
   const mktByMkt={ashare:0,hk:0,fund:0}; const mktValHas={ashare:false,hk:false,fund:false};
+  const tplByMkt={ashare:0,hk:0,fund:0}; const tplHas={ashare:false,hk:false,fund:false};
   for(const w of wl){
     const mkt=mktValue(w);
     if(mkt!==null && isFinite(mkt)){
@@ -3897,7 +3898,7 @@ function renderWatchlistFooter(){
       const mk=marketOf(w); mktByMkt[mk]+=mkt; mktValHas[mk]=true;
       const pl=plOf(w);
       if(pl!==null && isFinite(pl)){ totalPl+=pl; anyPl=true; plByMkt[mk]+=pl; mktHas[mk]=true; }
-      const tpl=cumPl(w); if(tpl!==null && isFinite(tpl)){ totalTpl+=tpl; anyTpl=true; }   // 累计收益=持有数量×(现价−成本价)
+      const tpl=cumPl(w); if(tpl!==null && isFinite(tpl)){ totalTpl+=tpl; anyTpl=true; tplByMkt[mk]+=tpl; tplHas[mk]=true; }   // 累计收益=持有数量×(现价−成本价),按市场分类累计
     }
   }
   const el=document.getElementById('wlFooter'); if(!el) return;
@@ -3911,10 +3912,11 @@ function renderWatchlistFooter(){
   const segs = seg('a','A股',plByMkt.ashare,mktHas.ashare)+seg('h','港股',plByMkt.hk,mktHas.hk)+seg('f','场外基金',plByMkt.fund,mktHas.fund);
   const segMkt = (key,label,val,has)=> has ? `<span class="seg seg-${key}">${label} ${fmtMoneyInline(val)}</span>` : '';
   const segsMkt = segMkt('a','A股',mktByMkt.ashare,mktValHas.ashare)+segMkt('h','港股',mktByMkt.hk,mktValHas.hk)+segMkt('f','场外基金',mktByMkt.fund,mktValHas.fund);
+  const segsTpl = seg('a','A股',tplByMkt.ashare,tplHas.ashare)+seg('h','港股',tplByMkt.hk,tplHas.hk)+seg('f','场外基金',tplByMkt.fund,tplHas.fund);
   el.innerHTML =
     `<span class="wl-stat"><span class="wl-stat-lbl">持仓总市值</span><b class="wl-stat-val">${fmtMoney(totalMkt)}</b>${segsMkt?`<span class="wl-stat-sep">${segsMkt}</span>`:''}</span>`+
     `<span class="wl-stat"><span class="wl-stat-lbl">今日预估收益</span><b class="wl-stat-val ${plCls}">${anyPl?fmtMoney(totalPl):'—'}</b>${segs?`<span class="wl-stat-sep">${segs}</span>`:''}</span>`+
-    `<span class="wl-stat"><span class="wl-stat-lbl">累计收益</span><b class="wl-stat-val ${tplCls}">${anyTpl?fmtMoney(totalTpl):'—'}</b></span>`;
+    `<span class="wl-stat"><span class="wl-stat-lbl">累计收益</span><b class="wl-stat-val ${tplCls}">${anyTpl?fmtMoney(totalTpl):'—'}</b>${segsTpl?`<span class="wl-stat-sep">${segsTpl}</span>`:''}</span>`;
   el.dataset.mode='summary';
 }
 /* 仅更新活 cells，不触碰份额输入框，避免 1s 刷新时冲掉输入框焦点 */
