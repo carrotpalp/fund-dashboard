@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-17T10:15:53",
+  "updatedAt": "2026-08-17T11:14:16",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
@@ -11,13 +11,13 @@
       "isQDII": false,
       "isToday": true,
       "isOfficial": false,
-      "estNav": 11.4198,
-      "estChgPct": -0.21,
-      "estChgAmt": -0.0245,
+      "estNav": 11.5409,
+      "estChgPct": 0.84,
+      "estChgAmt": 0.0966,
       "stockPct": 92.5,
       "topWeightSum": 57.35,
       "holdingsCount": 11,
-      "estTime": "2026-08-17 10:16"
+      "estTime": "2026-08-17 11:14"
     },
     "000979": {
       "code": "000979",
@@ -28,13 +28,13 @@
       "isQDII": false,
       "isToday": true,
       "isOfficial": false,
-      "estNav": 4.9373,
-      "estChgPct": -0.15,
-      "estChgAmt": -0.0077,
+      "estNav": 5.0063,
+      "estChgPct": 1.24,
+      "estChgAmt": 0.0613,
       "stockPct": 91.4,
       "topWeightSum": 56.67,
       "holdingsCount": 10,
-      "estTime": "2026-08-17 10:16"
+      "estTime": "2026-08-17 11:15"
     }
   }
 }
