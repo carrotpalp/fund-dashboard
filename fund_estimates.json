@@ -1,23 +1,20 @@
 {
-  "updatedAt": "2026-08-17T19:00:31",
+  "updatedAt": "2026-08-17T19:35:43",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
       "code": "377240",
-      "name": "摩根新兴动力混合A",
-      "nav": 11.4443,
-      "prevNav": 11.2372,
-      "navDate": "2026-08-14",
+      "name": "",
+      "nav": 11.806,
+      "prevNav": 11.4443,
+      "navDate": "2026-08-17",
       "isQDII": false,
       "isToday": true,
-      "isOfficial": false,
-      "estNav": 11.7941,
-      "estChgPct": 3.06,
-      "estChgAmt": 0.3498,
-      "stockPct": 92.5,
-      "topWeightSum": 57.35,
-      "holdingsCount": 11,
-      "estTime": "2026-08-17 19:00"
+      "estNav": 11.806,
+      "estChgPct": 3.1605,
+      "estChgAmt": 0.3617,
+      "isOfficial": true,
+      "estTime": "2026-08-17"
     },
     "000979": {
       "code": "000979",
@@ -34,7 +31,7 @@
       "stockPct": 91.4,
       "topWeightSum": 56.67,
       "holdingsCount": 10,
-      "estTime": "2026-08-17 19:01"
+      "estTime": "2026-08-17 19:35"
     }
   }
 }
