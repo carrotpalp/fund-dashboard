@@ -3954,6 +3954,7 @@ function updateWatchlistLive(){
   // 近30交易日每日收益：节流记录（每分钟至多一次；当天条目实时更新，收盘后定格为当日值）
   const _t = Date.now();
   if(_t - __wlPnlLastRec > 60000){ if(recordWatchlistDailyPnl()) __wlPnlLastRec = _t; }
+  correctWlPnlHistory();   // 官方净值披露后，自动把历史日被“估算”冻结的场外基金收益纠正为正式值
 }
 /* ============ 自选股近30交易日每日收益 · 本地缓存(localStorage) + 浮层 ============ */
 const WL_PNL_KEY = 'ashare_wl_pnl_history_v1';
@@ -3968,17 +3969,19 @@ function recordWatchlistDailyPnl(){
   const dow = new Date().getDay();
   if(dow===0 || dow===6) return false;        // 仅交易日（跳过周末；节假日若有交易亦会记录）
   let ashare=0, hk=0, fund=0, total=0, any=false;
+  const funds = [];                             // 场外基金逐只当日收益(元)，用于官方净值披露后回补历史
   for(const w of wl){
     const pl = plOf(w);                         // 当日收益(元)=持有数量×当日涨跌额（复用现成逻辑，股票/ETF/场外基金通用）
     if(pl===null || !isFinite(pl)) continue;
     const mk = marketOf(w);
-    if(mk==='ashare') ashare+=pl; else if(mk==='hk') hk+=pl; else if(mk==='fund') fund+=pl;
+    if(mk==='ashare') ashare+=pl; else if(mk==='hk') hk+=pl; else if(mk==='fund'){ fund+=pl; funds.push([w.code, Math.round(pl*100)/100]); }
     total+=pl; any=true;
   }
   if(!any) return false;                        // 没有任何「持有数量」的持仓则不记录
   const d = shanghaiToday();
   const r2 = v => Math.round(v*100)/100;
-  const entry = { date:d, ashare:r2(ashare), hk:r2(hk), fund:r2(fund), total:r2(total) };
+  const fundsMap = {}; for(const [c,v] of funds) fundsMap[c]=v;
+  const entry = { date:d, ashare:r2(ashare), hk:r2(hk), fund:r2(fund), total:r2(total), funds:fundsMap };
   const hist = loadWlPnlHistory();
   const idx = hist.findIndex(h=>h.date===d);
   if(idx>=0) hist[idx]=entry; else hist.unshift(entry);     // 当天只更新不重复
@@ -3986,6 +3989,41 @@ function recordWatchlistDailyPnl(){
   while(hist.length>30) hist.pop();                         // 仅保留最近30个交易日
   saveWlPnlHistory(hist);
   return true;
+}
+function correctWlPnlHistory(){
+  // 历史日被“估算”冻结的场外基金收益，在官方净值披露后自动纠正：
+  // 某持仓基金当前 isOfficial 且 navDate===该条目交易日时，用官方 change_amt 重算该基金当日收益并覆盖基金列。
+  // 新结构(含 funds 逐只)仅更新已披露基金、保留其余(QDII滞后等)；旧结构(仅聚合)按官方口径整体重算该日基金列。
+  const wl = STATE.watchlist||[];
+  if(!wl.length) return;
+  const hist = loadWlPnlHistory();
+  if(!hist.length) return;
+  let changed=false;
+  for(const e of hist){
+    const official={}; let officialSum=0, matched=0;
+    for(const w of wl){
+      if(w.classify!=='OTCFUND') continue;
+      const q=w.q;
+      if(!q || !(w.units>0) || !q.isOfficial || q.navDate!==e.date) continue;
+      const c=q.change_amt; if(typeof c!=='number'||!isFinite(c)) continue;
+      official[w.code]=Math.round(w.units*c*100)/100; officialSum+=official[w.code]; matched++;
+    }
+    if(!matched) continue;
+    let newFund, newTotal, newFunds;
+    if(e.funds && typeof e.funds==='object'){
+      newFunds = Object.assign({}, e.funds);
+      for(const k in official) newFunds[k]=official[k];
+      let s=0; for(const k in newFunds) s+=newFunds[k];
+      newFund=Math.round(s*100)/100;
+    }else{
+      newFunds=official; newFund=Math.round(officialSum*100)/100;
+    }
+    newTotal=Math.round((e.ashare+e.hk+newFund)*100)/100;
+    if(newFund!==e.fund || newTotal!==e.total || JSON.stringify(newFunds)!==JSON.stringify(e.funds||{})){
+      e.funds=newFunds; e.fund=newFund; e.total=newTotal; changed=true;
+    }
+  }
+  if(changed) saveWlPnlHistory(hist);
 }
 function computeTodayPnlLive(){
   // 实时计算今日收益拆分（元），与列表/页脚一致；用于浮层「今日」行随行情刷新（OTC 经 plOf 自然正确）
