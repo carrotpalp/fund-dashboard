@@ -4004,8 +4004,11 @@ function correctWlPnlHistory(){
     for(const w of wl){
       if(w.classify!=='OTCFUND') continue;
       const q=w.q;
-      if(!q || !(w.units>0) || !q.isOfficial || q.navDate!==e.date) continue;
-      const c=q.change_amt; if(typeof c!=='number'||!isFinite(c)) continue;
+      // 关键：不依赖 isOfficial 显示标志——后续交易日盘中基金会显示“估”(isOfficial=false)，但报价仍携带官方净值 change_amt(offChgAmt)；
+      // 只要 navDate===该条目交易日，就用官方 change_amt 纠正，确保历史被冻结的估算收益在任何时段打开页面都能被纠正。
+      if(!q || !(w.units>0) || q.navDate!==e.date) continue;
+      const c = (typeof q.offChgAmt==='number' && isFinite(q.offChgAmt)) ? q.offChgAmt : q.change_amt;
+      if(typeof c!=='number'||!isFinite(c)) continue;
       official[w.code]=Math.round(w.units*c*100)/100; officialSum+=official[w.code]; matched++;
     }
     if(!matched) continue;
@@ -5149,7 +5152,7 @@ async function estimateFundGz(code){
             if(gq && gq.change_pct!=null && !isNaN(gq.change_pct)){
               const gChgPct = +gq.change_pct;
               const estNav = +(nav*(1+gChgPct/100)).toFixed(4);
-              return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), change_pct:gChgPct,
+              return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), offChgAmt:chgAmt, change_pct:gChgPct,
                 amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
                 est:true, isOfficial:false, estMethod:'gold-etf-ref', isGold:true, isQDII:false,
                 isToday:true, navDate, gztime:tsToDate(Date.now())+' '+new Date().toLocaleTimeString('zh-CN',{hour12:false}) };
@@ -5201,7 +5204,7 @@ async function estimateFundGz(code){
         }
         const estNav = +(nav*(1+estChgPct/100)).toFixed(4);
         if(got){
-          return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), change_pct:estChgPct,
+          return {code, name, price:estNav, last_close:nav, change_amt:+(estNav-nav).toFixed(4), offChgAmt:chgAmt, change_pct:estChgPct,
             amount_wan:0, pe_ttm:0, mcap_yi:0, pb:0, vol_ratio:0,
             est:true, isOfficial:false, estMethod, isQDII:false,
             isToday:true, navDate, gztime:tsToDate(Date.now())+' '+new Date().toLocaleTimeString('zh-CN',{hour12:false}) };
