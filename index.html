@@ -5163,7 +5163,12 @@ async function estimateFundGz(code){
         const weightedHoldings = await getFundHoldingsClient(code);
         if(weightedHoldings && weightedHoldings.length){
           const topWeightSum = weightedHoldings.reduce((a,h)=>a+h.weight,0);
-          const stockPct = topWeightSum / 0.62; // 前十通常占股票仓位 ~62%，与云端 gen_fund_estimate.py 同口径
+          let stockPct = topWeightSum / 0.62; // 前十通常占股票仓位 ~62%（外推兜底，与云端 gen_fund_estimate.py 同口径）
+          if(pd && pd.sharesPos && pd.sharesPos.length){   // 优先用实际股票仓位，避免对高/低仓位基金外推失真(如002910实际80.7%被估成95.8%)
+            const sp = pd.sharesPos[pd.sharesPos.length-1];
+            const v = Array.isArray(sp) ? +sp[1] : +sp;
+            if(v>0 && v<=100) stockPct = v;
+          }
           const qs = await Promise.all(weightedHoldings.slice(0,10).map(h=>estQuote(toSecid(h.code))));
           const valid = [];
           for(let i=0;i<qs.length;i++){ const q=qs[i]; if(q && q.change_pct!=null && !isNaN(q.change_pct)) valid.push({w:weightedHoldings[i].weight, chg:q.change_pct}); }
