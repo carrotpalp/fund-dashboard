@@ -1,34 +1,34 @@
 {
-  "updatedAt": "2026-08-17T21:02:04",
+  "updatedAt": "2026-08-20T20:24:16",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
       "code": "377240",
       "name": "",
-      "nav": 11.806,
-      "prevNav": 11.4443,
-      "navDate": "2026-08-17",
+      "nav": 10.9604,
+      "prevNav": 10.9074,
+      "navDate": "2026-08-20",
       "isQDII": false,
       "isToday": true,
-      "estNav": 11.806,
-      "estChgPct": 3.1605,
-      "estChgAmt": 0.3617,
+      "estNav": 10.9604,
+      "estChgPct": 0.4859,
+      "estChgAmt": 0.053,
       "isOfficial": true,
-      "estTime": "2026-08-17"
+      "estTime": "2026-08-20"
     },
     "000979": {
       "code": "000979",
       "name": "",
-      "nav": 5.164,
-      "prevNav": 4.945,
-      "navDate": "2026-08-17",
+      "nav": 4.766,
+      "prevNav": 4.758,
+      "navDate": "2026-08-20",
       "isQDII": false,
       "isToday": true,
-      "estNav": 5.164,
-      "estChgPct": 4.4287,
-      "estChgAmt": 0.219,
+      "estNav": 4.766,
+      "estChgPct": 0.1681,
+      "estChgAmt": 0.008,
       "isOfficial": true,
-      "estTime": "2026-08-17"
+      "estTime": "2026-08-20"
     }
   }
 }
