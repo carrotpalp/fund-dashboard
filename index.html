@@ -5176,10 +5176,12 @@ async function estimateFundGz(code){
           const valid = [];
           for(let i=0;i<qs.length;i++){ const q=qs[i]; if(q && q.change_pct!=null && !isNaN(q.change_pct)) valid.push({w:weightedHoldings[i].weight, chg:q.change_pct}); }
           if(valid.length){
-            const weightedSum = valid.reduce((a,v)=>a+v.w*v.chg,0);
-            const validWeightSum = valid.reduce((a,v)=>a+v.w,0);
-            const wAvg = validWeightSum>0 ? weightedSum/validWeightSum : 0;
-            estChgPct = +((stockPct/100)*wAvg).toFixed(2);
+            const weightedSum = valid.reduce((a,v)=>a+v.w*v.chg,0);   // Σ(权重% × 涨跌%)：前十大对基金净值的贡献(%)
+            const topFrac = topWeightSum/100;                         // 前十大占基金比例(小数)
+            const unobsFrac = Math.max(0, stockPct/100 - topFrac);    // 非前十大权益占比(小数)
+            const mkt = await getCsi300Chg();                         // 沪深300ETF 实时涨跌% 作宽基参照(缓存)
+            // 前十大按真实权重贡献；非前十大权益锚定宽基实时涨跌，避免把高波动前十大方向放大到整只基金→防预估反号
+            estChgPct = +((weightedSum/100) + unobsFrac*(mkt||0)).toFixed(2);
             got = valid.length;
             estMethod = 'holdings-weighted';
           }
@@ -5256,6 +5258,17 @@ async function estQuote(secid){
   const q = await fetchEmQuote(secid);
   _estQuoteCache[secid] = {t:now, q};
   return q;
+}
+// 宽基参照：沪深300ETF(510300) 实时涨跌% ≈ 沪深300 指数，作场外基金"非前十大权益"部分的参照，避免高波动前十大被放大到整只基金
+let _csi300Cache = {t:0, v:null};
+async function getCsi300Chg(){
+  const now = Date.now();
+  if(_csi300Cache.t && now - _csi300Cache.t < 60000) return _csi300Cache.v;
+  try{
+    const q = await estQuote('1.510300');
+    if(q && q.change_pct!=null && !isNaN(q.change_pct)){ _csi300Cache = {t:now, v:+q.change_pct}; return _csi300Cache.v; }
+  }catch(e){}
+  return _csi300Cache.v;
 }
 function arrDateStr(item){
   const ts = Array.isArray(item) ? Number(item[0]) : Number(item.x);
