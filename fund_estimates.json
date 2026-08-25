@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-25T16:53:36",
+  "updatedAt": "2026-08-25T17:46:24",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
@@ -17,7 +17,7 @@
       "stockPct": 97.16,
       "topWeightSum": 60.24,
       "holdingsCount": 13,
-      "estTime": "2026-08-25 16:53"
+      "estTime": "2026-08-25 17:46"
     },
     "000979": {
       "code": "000979",
@@ -34,7 +34,7 @@
       "stockPct": 91.4,
       "topWeightSum": 56.67,
       "holdingsCount": 10,
-      "estTime": "2026-08-25 16:54"
+      "estTime": "2026-08-25 17:46"
     }
   }
 }
