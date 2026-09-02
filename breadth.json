@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-01T13:28:03.858+08:00",
+  "generatedAt": "2026-09-02T12:44:21.166+08:00",
   "source": "eastmoney push2delay (server snapshot, regenerated daily)",
-  "median": 0.0049,
-  "up": 3094,
-  "dn": 1995,
-  "flat": 119,
-  "total": 5208,
-  "upPct": 59.4,
-  "totAmt": 2032896635883.5417
+  "median": -0.0106,
+  "up": 1247,
+  "dn": 3858,
+  "flat": 104,
+  "total": 5209,
+  "upPct": 23.9,
+  "totAmt": 1790878522398.95
 }
