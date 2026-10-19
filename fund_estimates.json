@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-17T01:29:09",
+  "updatedAt": "2026-10-19T13:33:51",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
@@ -11,13 +11,13 @@
       "isQDII": false,
       "isToday": true,
       "isOfficial": false,
-      "estNav": 8.5289,
-      "estChgPct": -0.33,
-      "estChgAmt": -0.0279,
+      "estNav": 8.4565,
+      "estChgPct": -1.17,
+      "estChgAmt": -0.1003,
       "stockPct": 100.0,
       "topWeightSum": 90.98,
       "holdingsCount": 52,
-      "estTime": "2026-10-17 01:30"
+      "estTime": "2026-10-19 13:34"
     },
     "000979": {
       "code": "000979",
