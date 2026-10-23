@@ -1,12 +1,12 @@
 {
- "date": "2026-10-22",
+ "date": "2026-10-23",
  "source": "eastmoney",
  "coverage": 6,
  "ok": true,
  "error": null,
- "windowDays": 116,
- "netAmtToday": 74.973,
- "netShareToday": 37.892,
+ "windowDays": 117,
+ "netAmtToday": 12.747,
+ "netShareToday": -6.187,
  "available": [
   "510050",
   "510300",
