@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-26T19:32:10",
+  "updatedAt": "2026-10-26T23:06:21",
   "generatedBy": "github-action",
   "funds": {
     "377240": {
@@ -18,20 +18,17 @@
     },
     "000979": {
       "code": "000979",
-      "name": "景顺长城沪港深精选股票A",
-      "nav": 3.65,
-      "prevNav": 3.591,
-      "navDate": "2026-10-23",
+      "name": "",
+      "nav": 3.494,
+      "prevNav": 3.65,
+      "navDate": "2026-10-26",
       "isQDII": false,
       "isToday": true,
-      "isOfficial": false,
-      "estNav": 3.5608,
-      "estChgPct": -2.44,
-      "estChgAmt": -0.0892,
-      "stockPct": 100.0,
-      "topWeightSum": 85.45,
-      "holdingsCount": 25,
-      "estTime": "2026-10-26 19:32"
+      "estNav": 3.494,
+      "estChgPct": -4.274,
+      "estChgAmt": -0.156,
+      "isOfficial": true,
+      "estTime": "2026-10-26"
     }
   }
 }
