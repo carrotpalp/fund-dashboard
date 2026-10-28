@@ -1,20 +1,20 @@
 {
- "date": "2026-10-27",
+ "date": "2026-10-28",
  "source": "eastmoney",
  "coverage": 5,
  "ok": true,
  "error": null,
- "windowDays": 119,
- "netAmtToday": 48.78,
- "netShareToday": 4.532,
+ "windowDays": 120,
+ "netAmtToday": 65.416,
+ "netShareToday": 17.94,
  "available": [
   "510050",
   "510300",
   "510500",
-  "512100",
-  "588000"
+  "588000",
+  "159915"
  ],
  "missing": [
-  "159915"
+  "512100"
  ]
 }
